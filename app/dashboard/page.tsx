@@ -45,9 +45,39 @@ function DashboardContent() {
   useEffect(() => {
     if (!upgraded) { router.replace("/"); return; }
 
-    // Mark pro in localStorage so nav badge + limit skip work immediately
-    localStorage.setItem("ciq_plan", "pro");
-    setReady(true);
+    const clientId = localStorage.getItem("ciq_client_id");
+    if (!clientId) {
+      localStorage.setItem("ciq_plan", "pro");
+      sessionStorage.setItem("ciq_just_upgraded", Date.now().toString());
+      setReady(true);
+      return;
+    }
+
+    // Poll Supabase until the webhook has fired and plan = "pro"
+    let attempts = 0;
+    const MAX = 10;
+    const poll = async () => {
+      attempts++;
+      try {
+        const res  = await fetch(`/api/user/plan?client_id=${clientId}`);
+        const data = await res.json();
+        if (data.plan === "pro") {
+          localStorage.setItem("ciq_plan", "pro");
+          sessionStorage.setItem("ciq_just_upgraded", Date.now().toString());
+          setReady(true);
+          return;
+        }
+      } catch { /* non-fatal */ }
+      if (attempts < MAX) {
+        setTimeout(poll, 1200);
+      } else {
+        // Webhook delayed — still show success, main page guards the race
+        localStorage.setItem("ciq_plan", "pro");
+        sessionStorage.setItem("ciq_just_upgraded", Date.now().toString());
+        setReady(true);
+      }
+    };
+    setTimeout(poll, 800); // give webhook ~800ms head-start
   }, [upgraded, router]);
 
   if (!ready) {

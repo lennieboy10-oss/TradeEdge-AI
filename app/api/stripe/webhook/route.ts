@@ -23,6 +23,8 @@ export async function POST(req: Request) {
 
   const supabase = getSupabase();
 
+  console.log("[stripe/webhook] Webhook received:", event.type);
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -31,11 +33,16 @@ export async function POST(req: Request) {
         const email      = session.customer_email ?? session.metadata?.email ?? null;
         const customerId = typeof session.customer === "string" ? session.customer : null;
 
+        console.log("[stripe/webhook] Updating user plan to pro for:", clientId);
+
         if (clientId) {
-          await supabase.from("profiles").upsert(
+          const { data, error } = await supabase.from("profiles").upsert(
             { client_id: clientId, email, plan: "pro", stripe_customer_id: customerId },
             { onConflict: "client_id" }
-          );
+          ).select("id, client_id, plan");
+          console.log("[stripe/webhook] Supabase update result:", data, error);
+        } else {
+          console.warn("[stripe/webhook] No client_reference_id on session:", session.id);
         }
         break;
       }
@@ -43,11 +50,16 @@ export async function POST(req: Request) {
       case "customer.subscription.deleted": {
         const sub        = event.data.object as Stripe.Subscription;
         const customerId = typeof sub.customer === "string" ? sub.customer : null;
+        console.log("[stripe/webhook] Subscription deleted for customer:", customerId);
         if (customerId) {
-          await supabase.from("profiles").update({ plan: "free" }).eq("stripe_customer_id", customerId);
+          const { data, error } = await supabase.from("profiles").update({ plan: "free" }).eq("stripe_customer_id", customerId).select("id, plan");
+          console.log("[stripe/webhook] Supabase downgrade result:", data, error);
         }
         break;
       }
+
+      default:
+        console.log("[stripe/webhook] Unhandled event type:", event.type);
     }
   } catch (err) {
     console.error("[stripe/webhook] db update failed:", err);

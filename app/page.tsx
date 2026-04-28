@@ -1134,16 +1134,29 @@ export default function App() {
       .then((d) => { if (Array.isArray(d.events)) setCalendarEvents(d.events); })
       .catch(() => {});
 
-    // Sync plan from server (background, non-blocking)
-    fetch(`/api/user/plan?client_id=${id}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.plan) {
-          setPlan(d.plan);
-          localStorage.setItem("ciq_plan", d.plan);
-        }
-      })
-      .catch(() => {});
+    // Sync plan from Supabase — race-condition guard: never downgrade within
+    // 30s of an upgrade (webhook may still be in-flight)
+    const syncPlan = (retryOnDowngrade = true) => {
+      fetch(`/api/user/plan?client_id=${id}`)
+        .then((r) => r.json())
+        .then((d) => {
+          const serverPlan    = d.plan ?? "free";
+          const localPlan     = localStorage.getItem("ciq_plan") ?? "free";
+          const justUpgraded  = sessionStorage.getItem("ciq_just_upgraded");
+          const upgradeRecent = justUpgraded && Date.now() - parseInt(justUpgraded) < 30_000;
+
+          if (serverPlan === "free" && localPlan === "pro" && upgradeRecent && retryOnDowngrade) {
+            // Webhook may not have fired yet — retry once after 3s
+            setTimeout(() => syncPlan(false), 3000);
+            return;
+          }
+
+          setPlan(serverPlan);
+          localStorage.setItem("ciq_plan", serverPlan);
+        })
+        .catch(() => {});
+    };
+    syncPlan();
   }, []);
 
   // Scroll-reveal
