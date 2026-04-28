@@ -37,51 +37,72 @@ function AnimatedCheck() {
 }
 
 function DashboardContent() {
-  const params   = useSearchParams();
-  const router   = useRouter();
-  const upgraded = params.get("upgraded") === "true";
-  const [ready,  setReady]  = useState(false);
+  const params    = useSearchParams();
+  const router    = useRouter();
+  const upgraded  = params.get("upgraded")   === "true";
+  const sessionId = params.get("session_id") ?? null;
+  const [ready,   setReady]  = useState(false);
+  const [status,  setStatus] = useState("Activating your Pro plan…");
 
   useEffect(() => {
     if (!upgraded) { router.replace("/"); return; }
 
     const clientId = localStorage.getItem("ciq_client_id");
-    if (!clientId) {
-      localStorage.setItem("ciq_plan", "pro");
-      sessionStorage.setItem("ciq_just_upgraded", Date.now().toString());
-      setReady(true);
-      return;
+
+    async function activate() {
+      // Direct activation: retrieve the Stripe session and upgrade profile immediately
+      if (sessionId && clientId) {
+        try {
+          setStatus("Activating your Pro plan…");
+          const res  = await fetch("/api/stripe/activate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId, clientId }),
+          });
+          const data = await res.json();
+          if (data.plan === "pro") {
+            localStorage.setItem("ciq_plan", "pro");
+            setReady(true);
+            return;
+          }
+        } catch { /* fall through to poll */ }
+      }
+
+      // Fallback: poll Supabase (webhook may have already fired)
+      setStatus("Confirming upgrade…");
+      let attempts = 0;
+      const poll = async () => {
+        attempts++;
+        try {
+          const res  = await fetch(`/api/user/plan?client_id=${clientId ?? ""}`);
+          const data = await res.json();
+          if (data.plan === "pro") {
+            localStorage.setItem("ciq_plan", "pro");
+            setReady(true);
+            return;
+          }
+        } catch { /* non-fatal */ }
+        if (attempts < 8) {
+          setTimeout(poll, 1500);
+        } else {
+          // Last resort — show success anyway (manual check later)
+          localStorage.setItem("ciq_plan", "pro");
+          setReady(true);
+        }
+      };
+      setTimeout(poll, 800);
     }
 
-    // Poll Supabase until the webhook has fired and plan = "pro"
-    let attempts = 0;
-    const MAX = 10;
-    const poll = async () => {
-      attempts++;
-      try {
-        const res  = await fetch(`/api/user/plan?client_id=${clientId}`);
-        const data = await res.json();
-        if (data.plan === "pro") {
-          localStorage.setItem("ciq_plan", "pro");
-          sessionStorage.setItem("ciq_just_upgraded", Date.now().toString());
-          setReady(true);
-          return;
-        }
-      } catch { /* non-fatal */ }
-      if (attempts < MAX) {
-        setTimeout(poll, 1200);
-      } else {
-        // Webhook delayed — still show success, main page guards the race
-        localStorage.setItem("ciq_plan", "pro");
-        sessionStorage.setItem("ciq_just_upgraded", Date.now().toString());
-        setReady(true);
-      }
-    };
-    setTimeout(poll, 800); // give webhook ~800ms head-start
-  }, [upgraded, router]);
+    activate();
+  }, [upgraded, sessionId, router]);
 
   if (!ready) {
-    return <div className="min-h-screen bg-[#080a10]" />;
+    return (
+      <div className="min-h-screen bg-[#080a10] flex flex-col items-center justify-center gap-4">
+        <div className="w-8 h-8 rounded-full border-2 border-[#00e676]/30 border-t-[#00e676] animate-spin" />
+        <p className="font-dm-mono text-[#6b7280] text-sm tracking-wider">{status}</p>
+      </div>
+    );
   }
 
   return (
