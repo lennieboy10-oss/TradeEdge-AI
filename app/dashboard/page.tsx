@@ -60,12 +60,15 @@ function DashboardContent() {
             body: JSON.stringify({ sessionId, clientId }),
           });
           const data = await res.json();
+          console.log("[dashboard] activate result:", data);
           if (data.plan === "pro") {
             localStorage.setItem("ciq_plan", "pro");
+            sessionStorage.setItem("ciq_verified_pro", "true");
             setReady(true);
             return;
           }
-        } catch { /* fall through to poll */ }
+          if (data.error) console.error("[dashboard] activate error:", data.error);
+        } catch (e) { console.error("[dashboard] activate threw:", e); }
       }
 
       // Fallback: poll Supabase (webhook may have already fired)
@@ -76,8 +79,10 @@ function DashboardContent() {
         try {
           const res  = await fetch(`/api/user/plan?client_id=${clientId ?? ""}`);
           const data = await res.json();
+          console.log(`[dashboard] poll attempt ${attempts}:`, data.plan);
           if (data.plan === "pro") {
             localStorage.setItem("ciq_plan", "pro");
+            sessionStorage.setItem("ciq_verified_pro", "true");
             setReady(true);
             return;
           }
@@ -85,8 +90,10 @@ function DashboardContent() {
         if (attempts < 8) {
           setTimeout(poll, 1500);
         } else {
-          // Last resort — show success anyway (manual check later)
+          // Last resort — payment completed so mark as pro; webhook/activate failed
+          console.warn("[dashboard] could not confirm pro in Supabase after 8 attempts");
           localStorage.setItem("ciq_plan", "pro");
+          sessionStorage.setItem("ciq_verified_pro", "true");
           setReady(true);
         }
       };

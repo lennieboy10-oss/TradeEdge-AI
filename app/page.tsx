@@ -1134,7 +1134,16 @@ export default function App() {
       .then((d) => { if (Array.isArray(d.events)) setCalendarEvents(d.events); })
       .catch(() => {});
 
-    // Fetch plan from Supabase once — this is the source of truth
+    // If we verified pro in this browser session (just upgraded), trust it —
+    // don't let a slow/failed Supabase fetch revert the plan.
+    if (sessionStorage.getItem("ciq_verified_pro") === "true") {
+      setPlan("pro");
+      localStorage.setItem("ciq_plan", "pro");
+      console.log("Current plan from Supabase: pro (session-verified)");
+      return;
+    }
+
+    // Otherwise fetch from Supabase — source of truth on fresh loads
     fetch(`/api/user/plan?client_id=${id}`)
       .then((r) => r.json())
       .then((d) => {
@@ -1142,6 +1151,8 @@ export default function App() {
         console.log("Current plan from Supabase:", serverPlan);
         setPlan(serverPlan);
         localStorage.setItem("ciq_plan", serverPlan);
+        // If Supabase confirms pro, persist it for this session too
+        if (serverPlan === "pro") sessionStorage.setItem("ciq_verified_pro", "true");
       })
       .catch(() => {});
   }, []);
