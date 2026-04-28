@@ -1369,41 +1369,123 @@ export default function App() {
       </nav>
 
       {/* ── HERO ────────────────────────────────────────────── */}
-      <section className="relative pt-40 pb-28 px-6 text-center overflow-hidden">
+      <section className="relative pt-36 pb-24 px-6 overflow-hidden">
         <div className="absolute top-0 left-1/2 hero-glow pointer-events-none"
-          style={{ width: "900px", height: "520px", background: "radial-gradient(ellipse at center top, rgba(124,58,237,0.15) 0%, transparent 68%)" }} />
+          style={{ width: "1000px", height: "560px", background: "radial-gradient(ellipse at center top, rgba(0,230,118,0.1) 0%, rgba(124,58,237,0.1) 40%, transparent 70%)" }} />
 
-        <div className="relative z-10 max-w-4xl mx-auto">
-          <div className="animate-fade-up">
-            <SectionBadge>
-              <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse-dot" />
-              AI-Powered Chart Analysis
-            </SectionBadge>
-          </div>
-          <h1 className="animate-fade-up delay-100 text-[clamp(42px,7vw,72px)] font-extrabold leading-[1.08] tracking-tight mb-6">
-            See What The Market Is<br />
-            <span className="text-[#f5c518]">About </span>
-            <span className="text-[#38bdf8]">To Do</span><br />
-            Before It Happens
-          </h1>
-          <p className="animate-fade-up delay-200 text-[#6b7280] text-xl mb-10 max-w-sm mx-auto leading-relaxed">
-            Upload a chart. Let AI reveal the trade.
-          </p>
-          <div className="animate-fade-up delay-300 flex flex-wrap items-center justify-center gap-3 mb-16">
-            <button className="btn-purple px-7 py-3.5 text-sm">View Pricing →</button>
-            <a href="#analyze" className="btn-yellow px-7 py-3.5 text-sm flex items-center gap-2">⚡ Analyze My Chart</a>
-            <button className="btn-outline px-7 py-3.5 text-sm flex items-center gap-2">▶ Watch Demo</button>
-          </div>
-          <div className="animate-fade-up delay-400 flex flex-wrap items-center justify-center gap-4">
-            {[{ value: "50K+", label: "Charts Analyzed" }, { value: "100+", label: "Countries" }, { value: "<3s", label: "Analysis Speed" }].map((s) => (
-              <div key={s.label} className="px-8 py-5 rounded-2xl border border-white/[0.07] bg-white/[0.025] text-center min-w-[136px]">
-                <div className="text-[28px] font-extrabold text-[#f5c518] leading-none mb-1">{s.value}</div>
-                <div className="text-[#6b7280] text-xs tracking-wide">{s.label}</div>
+        <div className="relative z-10 max-w-6xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+
+            {/* Left — copy */}
+            <div>
+              <div className="animate-fade-up">
+                <SectionBadge>
+                  <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse-dot" />
+                  AI-Powered Chart Analysis
+                </SectionBadge>
               </div>
-            ))}
+              <h1 className="animate-fade-up delay-100 font-bebas text-[clamp(52px,7vw,84px)] leading-[0.93] tracking-[0.02em] text-white mb-6">
+                THE SMARTEST WAY<br />TO READ ANY<br /><span className="text-[#00e676]">CHART</span>
+              </h1>
+              <p className="animate-fade-up delay-200 text-[#9ca3af] text-lg mb-8 max-w-lg leading-relaxed">
+                Drop a screenshot. Get your entry, stop loss, take profit, confidence score, and full AI trade breakdown in seconds. For stocks, crypto, and forex.
+              </p>
+              <div className="animate-fade-up delay-300 flex flex-wrap gap-3 mb-10">
+                <a href="#analyze" className="btn-yellow px-7 py-3.5 text-sm flex items-center gap-2">⚡ Start free — no card needed</a>
+                <a href="#how-it-works" className="btn-outline px-7 py-3.5 text-sm flex items-center gap-2">See it in action →</a>
+              </div>
+              <div className="animate-fade-up delay-400 flex flex-wrap gap-8">
+                {[{ value: "2,400+", label: "Active traders" }, { value: "<5s", label: "Analysis speed" }, { value: "3", label: "Free analyses/day" }].map((s) => (
+                  <div key={s.label}>
+                    <div className="font-bebas text-[32px] text-[#00e676] leading-none">{s.value}</div>
+                    <div className="text-[#6b7280] text-xs tracking-wide mt-0.5">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right — floating trade card */}
+            <div className="animate-fade-up delay-200 relative flex justify-center lg:justify-end">
+              <div className="relative w-full max-w-sm">
+                <div className="absolute inset-0 rounded-3xl pointer-events-none"
+                  style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(0,230,118,0.18) 0%, transparent 70%)" }} />
+                <div className="relative rounded-2xl border border-[#00e676]/20 p-6"
+                  style={{ background: "#0c1410", boxShadow: "0 0 60px rgba(0,230,118,0.08), 0 24px 64px rgba(0,0,0,0.5)" }}>
+                  <div className="flex items-center justify-between mb-5">
+                    <div>
+                      <p className="font-dm-mono text-[10px] uppercase tracking-widest text-[#6b7280] mb-0.5">AI Analysis</p>
+                      <p className="font-bebas text-xl tracking-wide text-white">BTC/USD · 4H</p>
+                    </div>
+                    <div className="px-3 py-1.5 rounded-xl font-dm-mono text-xs font-bold"
+                      style={{ background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.25)" }}>
+                      LONG
+                    </div>
+                  </div>
+                  <div className="rounded-xl overflow-hidden mb-5" style={{ background: "rgba(0,230,118,0.04)", border: "1px solid rgba(0,230,118,0.1)", height: "72px" }}>
+                    <svg viewBox="0 0 280 72" width="100%" height="72" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#00e676" stopOpacity="0.4" />
+                          <stop offset="100%" stopColor="#00e676" stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <path d="M0 60 L40 52 L80 48 L100 54 L130 38 L160 30 L200 22 L240 14 L280 8 L280 72 L0 72"
+                        fill="url(#chartGrad)" opacity="0.3" />
+                      <path d="M0 60 L40 52 L80 48 L100 54 L130 38 L160 30 L200 22 L240 14 L280 8"
+                        fill="none" stroke="#00e676" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                  <div className="space-y-2.5 mb-5">
+                    {[
+                      { label: "Entry",         value: "$67,420", color: "white" },
+                      { label: "Stop Loss",      value: "$65,800", color: "#f87171" },
+                      { label: "Take Profit",    value: "$71,200", color: "#4ade80" },
+                      { label: "Risk / Reward",  value: "1:2.3",   color: "#c084fc" },
+                    ].map((row) => (
+                      <div key={row.label} className="flex justify-between items-center">
+                        <span className="text-[#6b7280] text-xs">{row.label}</span>
+                        <span className="font-dm-mono text-xs font-semibold" style={{ color: row.color }}>{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-xl p-3 flex items-center justify-between"
+                    style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
+                    <span className="font-dm-mono text-[10px] uppercase tracking-widest text-[#6b7280]">Confidence</span>
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-24 rounded-full overflow-hidden bg-white/10">
+                        <div className="h-full rounded-full bg-[#00e676]" style={{ width: "84%" }} />
+                      </div>
+                      <span className="font-dm-mono text-sm font-bold text-[#00e676]">84%</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="absolute -top-3 -right-3 px-3 py-1.5 rounded-xl font-dm-mono text-[10px] font-bold"
+                  style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 20px rgba(0,230,118,0.5)" }}>
+                  STRONG SETUP
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
+
+      {/* ── SOCIAL PROOF BAR ────────────────────────────────── */}
+      <div className="border-y border-white/[0.05] bg-white/[0.01] py-5 px-6">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <p className="font-dm-mono text-[11px] uppercase tracking-[0.15em] text-[#6b7280] text-center md:text-left whitespace-nowrap">
+            Join 2,400+ traders already using ChartIQ
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-6">
+            {["TradingView", "Binance", "MT4", "MT5", "FXReplay", "Interactive Brokers"].map((p, i) => (
+              <span key={p} className="font-dm-mono text-[11px] font-semibold tracking-wider text-[#4b5563] hover:text-[#9ca3af] transition-colors cursor-default flex items-center gap-2">
+                {i > 0 && <span className="text-white/10">·</span>}
+                {p}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* ── ANALYZE ─────────────────────────────────────────── */}
       <section id="analyze" className="py-24 px-6">
@@ -1870,20 +1952,22 @@ export default function App() {
           <div className="text-center mb-14" data-animate>
             <SectionBadge>POWERFUL FEATURES</SectionBadge>
             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-              The Trading Edge You've Been <span className="text-[#f5c518]">Missing</span>
+              Everything You Need to <span className="text-[#f5c518]">Trade Smarter</span>
             </h2>
             <p className="text-[#6b7280] mt-4 text-lg max-w-lg mx-auto">
-              Every feature designed to give you an unfair advantage in the markets
+              Eight tools. One platform. Every edge you need.
             </p>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
             {[
-              { emoji: "📊", title: "Instant Chart Intelligence",  desc: "AI reads your chart in seconds, identifying patterns, support/resistance levels, and key price zones automatically.", bg: "rgba(124,58,237,0.1)",  delay: "1" },
-              { emoji: "🎯", title: "High-Probability Setups",     desc: "Know exactly where to enter and exit with precise trade setups backed by AI analysis and historical data.",          bg: "rgba(245,197,24,0.1)",  delay: "2" },
-              { emoji: "🛡",  title: "Advanced Risk Insights",     desc: "Never trade blindly again. Get comprehensive risk analysis including position sizing and drawdown warnings.",          bg: "rgba(74,222,128,0.1)",  delay: "3" },
-              { emoji: "🌐", title: "Multi-Market Compatible",     desc: "Works seamlessly across crypto, forex, stocks, and commodities. One tool for all your trading markets.",             bg: "rgba(56,189,248,0.1)",  delay: "4" },
-              { emoji: "📚", title: "Built for All Levels",        desc: "From beginners to professional traders. Our AI adapts to your experience level and trading style.",                   bg: "rgba(167,139,250,0.1)", delay: "5" },
-              { emoji: "⚡",  title: "Save Hours Daily",           desc: "Skip the tedious chart analysis. Get actionable insights in under 3 seconds and focus on executing trades.",          bg: "rgba(251,146,60,0.1)",  delay: "6" },
+              { emoji: "📊", title: "AI Chart Analysis",        desc: "Instant signal detection with entry, SL, TP and R:R — analysed in under 5 seconds.",                                   bg: "rgba(0,230,118,0.1)",   delay: "1" },
+              { emoji: "🎯", title: "Confidence Score",         desc: "0–100 score showing exactly how strong or weak the setup is before you risk a penny.",                                  bg: "rgba(245,197,24,0.1)",  delay: "2" },
+              { emoji: "📓", title: "Trade Journal",            desc: "Every analysis auto-saved. Track wins, losses and win rate over time without lifting a finger.",                        bg: "rgba(74,222,128,0.1)",  delay: "3" },
+              { emoji: "📈", title: "Multi-Timeframe Analysis", desc: "See confluence across current, higher and highest timeframes so you never trade against the trend. Pro feature.",      bg: "rgba(124,58,237,0.1)",  delay: "4" },
+              { emoji: "📅", title: "Economic Calendar",        desc: "High-impact news alerts built in. Never trade into NFP, CPI or FOMC releases blindly again.",                          bg: "rgba(56,189,248,0.1)",  delay: "5" },
+              { emoji: "🧮", title: "Risk Calculator",          desc: "Input your balance and risk %. Get your exact position size and potential profit or loss instantly.",                   bg: "rgba(251,146,60,0.1)",  delay: "6" },
+              { emoji: "🔔", title: "Watchlist & Alerts",       desc: "Save your favourite pairs and get email alerts the moment a signal fires on your watchlist.",                          bg: "rgba(167,139,250,0.1)", delay: "7" },
+              { emoji: "💬", title: "Follow-up AI Chat",        desc: "Ask Claude anything about your chart after the analysis — unlimited questions on Pro.",                                bg: "rgba(248,113,113,0.1)", delay: "8" },
             ].map((f) => (
               <div key={f.title} className="card-dark card-lift p-6" data-animate data-delay={f.delay}>
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-[22px] mb-4" style={{ background: f.bg }}>{f.emoji}</div>
@@ -1895,41 +1979,129 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── FEATURES SHOWCASE ───────────────────────────────── */}
+      <section className="py-20 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid md:grid-cols-3 gap-6">
+
+            {/* 1 — Confidence meter */}
+            <div className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay="1">
+              <div>
+                <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#00e676] font-semibold mb-2">KNOW YOUR EDGE</p>
+                <h3 className="text-xl font-bold text-white mb-2">Confidence score on every setup</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed">Never trade a weak signal again. The AI scores every setup from 0–100 so you know exactly when to pull the trigger.</p>
+              </div>
+              <div className="rounded-xl p-5 flex flex-col items-center gap-3 mt-auto"
+                style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.15)" }}>
+                <div className="relative w-28 h-28">
+                  <svg viewBox="0 0 100 100" width="112" height="112">
+                    <circle cx="50" cy="50" r="36" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="6" strokeLinecap="round"
+                      strokeDasharray={`${2*Math.PI*36*240/360} ${2*Math.PI*36*(1-240/360)}`} transform="rotate(150 50 50)" />
+                    <circle cx="50" cy="50" r="36" fill="none" stroke="#00e676" strokeWidth="6" strokeLinecap="round"
+                      strokeDasharray={`${2*Math.PI*36*240/360*0.84} ${2*Math.PI*36*(1-0.84*240/360)}`} transform="rotate(150 50 50)"
+                      style={{ filter: "drop-shadow(0 0 7px rgba(0,230,118,0.6))" }} />
+                    <text x="50" y="55" textAnchor="middle" fill="white" fontSize="26" style={{ fontFamily: "var(--font-bebas), Impact, sans-serif" }}>84</text>
+                  </svg>
+                </div>
+                <p className="font-dm-mono text-xs text-[#00e676] font-semibold">Strong setup — high confidence</p>
+              </div>
+            </div>
+
+            {/* 2 — Watchlist */}
+            <div className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay="2">
+              <div>
+                <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#f59e0b] font-semibold mb-2">NEVER MISS A SETUP</p>
+                <h3 className="text-xl font-bold text-white mb-2">Email alerts when signals fire</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed">Add pairs to your watchlist and get alerted the moment the AI spots a trade meeting your criteria.</p>
+              </div>
+              <div className="space-y-2.5 mt-auto">
+                {[
+                  { pair: "EUR/USD", signal: "LONG",  conf: 78, color: "#00e676" },
+                  { pair: "BTC/USD", signal: "LONG",  conf: 84, color: "#00e676" },
+                  { pair: "GBP/JPY", signal: "SHORT", conf: 71, color: "#f87171" },
+                ].map((w) => (
+                  <div key={w.pair} className="flex items-center justify-between px-4 py-3 rounded-xl"
+                    style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span className="font-dm-mono text-sm font-bold text-white">{w.pair}</span>
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-lg"
+                        style={{ background: `${w.color}15`, color: w.color, border: `1px solid ${w.color}30` }}>{w.signal}</span>
+                      <span className="font-dm-mono text-[11px] text-[#6b7280]">{w.conf}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 3 — Journal */}
+            <div className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay="3">
+              <div>
+                <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#c084fc] font-semibold mb-2">TRACK EVERY TRADE</p>
+                <h3 className="text-xl font-bold text-white mb-2">Auto-saved journal with win rate</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed">Every analysis lands in your journal automatically. Mark outcomes, add notes, and watch your edge compound.</p>
+              </div>
+              <div className="rounded-xl p-4 mt-auto" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex justify-between items-center mb-4">
+                  <p className="font-dm-mono text-[10px] uppercase tracking-widest text-[#6b7280]">Win Rate</p>
+                  <span className="font-bebas text-2xl text-[#00e676]">68%</span>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { asset: "EUR/USD", outcome: "WIN",  color: "#00e676" },
+                    { asset: "BTC/USD", outcome: "WIN",  color: "#00e676" },
+                    { asset: "AAPL",    outcome: "LOSS", color: "#f87171" },
+                  ].map((j) => (
+                    <div key={j.asset} className="flex justify-between items-center text-xs">
+                      <span className="font-dm-mono text-[#9ca3af]">{j.asset}</span>
+                      <span className="font-dm-mono font-bold" style={{ color: j.color }}>{j.outcome}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
       {/* ── HOW IT WORKS ────────────────────────────────────── */}
       <section id="how-it-works" className="py-24 px-6">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-14" data-animate>
             <SectionBadge>HOW IT WORKS</SectionBadge>
             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-              Three Steps to <span className="text-[#f5c518]">Trading Intelligence</span>
+              Chart to trade plan in <span className="text-[#f5c518]">under 5 seconds</span>
             </h2>
-            <p className="text-[#6b7280] mt-4 text-lg">From chart to clarity in seconds. No complex setup, no learning curve.</p>
+            <p className="text-[#6b7280] mt-4 text-lg">No complex setup. No learning curve. Just drop and go.</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
             {[
-              { n: "1", emoji: "🖼", highlight: false, delay: "1", title: "Upload Your Chart",
-                desc: "Take a screenshot of any trading chart — TradingView, MetaTrader, Binance, or any platform — and upload it.",
-                checks: ["Screenshot or drag & drop", "Any chart timeframe", "All markets supported"] },
-              { n: "2", emoji: "🤖", highlight: false, delay: "2", title: "AI Analyzes Instantly",
-                desc: "Our AI processes your chart in under 3 seconds, detecting patterns, trend lines, indicators, and market structure.",
-                checks: ["Pattern recognition", "Support & resistance", "Volume & momentum analysis"] },
-              { n: "3", emoji: "📈", highlight: true, delay: "3", title: "Get Actionable Insights",
-                desc: "Receive clear, actionable trade setups with entry points, stop loss, take profit targets, and confidence scores.",
-                checks: ["Entry & exit points", "Risk-reward ratio", "Confidence score"] },
+              { n: "1", emoji: "🖥",  highlight: false, delay: "1", title: "Screenshot any chart",
+                desc: "TradingView, Binance, MT4/5, FXReplay — any platform, any timeframe.",
+                checks: ["Drag & drop or click to upload", "PNG, JPG supported", "Any chart platform"] },
+              { n: "2", emoji: "🤖",  highlight: false, delay: "2", title: "Drop it in ChartIQ",
+                desc: "AI reads price action, structure, volume and indicators instantly.",
+                checks: ["Pattern recognition", "Support & resistance", "Multi-indicator analysis"] },
+              { n: "3", emoji: "📋",  highlight: true,  delay: "3", title: "Get your full trade plan",
+                desc: "Signal, entry, SL, TP, R:R, confidence score and AI summary in under 5 seconds.",
+                checks: ["Entry & exit levels", "Risk-reward ratio", "Confidence score 0–100"] },
+              { n: "4", emoji: "📊",  highlight: false, delay: "4", title: "Track your performance",
+                desc: "Every analysis auto-saved to your trade journal with win rate tracking.",
+                checks: ["Auto-saved to journal", "Win/loss tracking", "Performance over time"] },
             ].map((step) => (
-              <div key={step.n} className="relative rounded-2xl border p-7 transition-all duration-200 hover:-translate-y-1"
+              <div key={step.n} className="relative rounded-2xl border p-6 transition-all duration-200 hover:-translate-y-1"
                 style={{ borderColor: step.highlight ? "rgba(245,197,24,0.6)" : "rgba(255,255,255,0.07)", background: step.highlight ? "rgba(245,197,24,0.03)" : "#0c0f18", boxShadow: step.highlight ? "0 0 30px rgba(245,197,24,0.08)" : "none" }}
                 data-animate data-delay={step.delay}>
                 <div className="absolute -top-4 -left-4 w-8 h-8 rounded-xl flex items-center justify-center text-sm font-extrabold shadow-lg"
                   style={{ background: step.highlight ? "#f5c518" : "#00e676", color: "#080a10", boxShadow: step.highlight ? "0 0 16px rgba(245,197,24,0.5)" : "0 0 14px rgba(0,230,118,0.45)" }}>
                   {step.n}
                 </div>
-                <div className="w-14 h-14 rounded-2xl bg-white/[0.04] flex items-center justify-center text-3xl mb-4">{step.emoji}</div>
-                <h3 className="font-bold text-white text-lg mb-2">{step.title}</h3>
+                <div className="w-12 h-12 rounded-2xl bg-white/[0.04] flex items-center justify-center text-2xl mb-4">{step.emoji}</div>
+                <h3 className="font-bold text-white mb-2">{step.title}</h3>
                 <p className="text-[#6b7280] text-sm leading-relaxed mb-4">{step.desc}</p>
-                <ul className="space-y-2">
+                <ul className="space-y-1.5">
                   {step.checks.map((c) => (
-                    <li key={c} className="flex items-start gap-2 text-sm text-[#6b7280]">
+                    <li key={c} className="flex items-start gap-2 text-xs text-[#6b7280]">
                       <Check color={step.highlight ? "#f5c518" : "#22c55e"} />{c}
                     </li>
                   ))}
@@ -1938,7 +2110,7 @@ export default function App() {
             ))}
           </div>
           <div className="text-center mt-12" data-animate>
-            <a href="#analyze" className="btn-purple inline-flex items-center gap-2 px-8 py-3.5 text-sm">See It In Action →</a>
+            <a href="#analyze" className="btn-purple inline-flex items-center gap-2 px-8 py-3.5 text-sm">Try It Free →</a>
           </div>
         </div>
       </section>
@@ -1951,50 +2123,109 @@ export default function App() {
             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
               Choose Your <span className="text-[#f5c518]">Trading Edge</span>
             </h2>
-            <p className="text-[#6b7280] mt-4 text-lg">Start free. Upgrade when you're ready to dominate the markets.</p>
+            <p className="text-[#6b7280] mt-4 text-lg">Start free. Upgrade when you&apos;re ready to go unlimited.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-6">
             {[
-              { name: "Starter", sub: "Perfect for beginners", price: "$0", period: "/month", note: "Free forever", noteColor: "#4ade80",
-                features: ["5 chart analyses/month", "Basic trade setups", "Email support"], disabled: ["Advanced risk analysis"],
-                cta: "Get Started Free", highlight: false, popular: false, delay: "1" },
-              { name: "Pro", sub: "For serious traders", price: "$49", period: "/month", was: "$79/month",
-                note: "Limited-time pricing", noteColor: "#f5c518",
-                features: ["Unlimited chart analyses", "Advanced trade setups", "Full risk analysis", "Priority support", "Multi-market analysis"],
-                cta: "Start Free Trial", highlight: true, popular: true, delay: "2" },
-              { name: "Elite", sub: "For professional traders", price: "$99", period: "/month", was: "$149/month",
-                note: "Limited-time pricing", noteColor: "#f5c518",
-                features: ["Everything in Pro", "API access", "Custom alerts", "1-on-1 onboarding", "White-label option"],
-                cta: "Contact Sales", highlight: false, popular: false, delay: "3" },
-            ].map((plan) => (
-              <div key={plan.name}
+              {
+                name: "Free", sub: "For new traders", price: "£0", period: "/month", note: "No card needed", noteColor: "#4ade80",
+                features: ["3 chart analyses per day", "Basic signal + entry/SL/TP", "Confidence score", "Economic calendar", "Risk calculator", "Last 10 journal entries", "1 follow-up question per analysis", "5 watchlist pairs"],
+                disabled: [],
+                cta: "Start for free", highlight: false, popular: false, delay: "1",
+              },
+              {
+                name: "Pro", sub: "For serious traders", price: "£19", period: "/month", note: "Most popular", noteColor: "#f5c518",
+                features: ["Unlimited chart analyses", "Full trade breakdown + R:R", "Multi-timeframe analysis", "Unlimited journal history", "Unlimited follow-up questions", "Unlimited watchlist pairs", "Email alerts on watchlist", "Priority support", "PRO badge"],
+                disabled: [],
+                cta: "Upgrade to Pro", highlight: true, popular: true, delay: "2",
+              },
+              {
+                name: "Elite", sub: "For professional traders", price: "£39", period: "/month", note: "Coming soon", noteColor: "#c084fc",
+                features: ["Everything in Pro", "Multi-chart comparison", "PDF export", "Custom branding on exports", "Early access to new features", "24h priority support"],
+                disabled: [],
+                cta: "Join waitlist", highlight: false, popular: false, delay: "3",
+              },
+            ].map((planItem) => (
+              <div key={planItem.name}
                 className="relative rounded-2xl border p-7 transition-all duration-200 hover:-translate-y-1"
-                style={{ borderColor: plan.highlight ? "rgba(245,197,24,0.55)" : "rgba(255,255,255,0.07)", background: plan.highlight ? "rgba(245,197,24,0.025)" : "#0c0f18", boxShadow: plan.highlight ? "0 0 40px rgba(245,197,24,0.07)" : "none" }}
-                data-animate data-delay={plan.delay}>
-                {plan.popular && (
+                style={{ borderColor: planItem.highlight ? "rgba(245,197,24,0.55)" : "rgba(255,255,255,0.07)", background: planItem.highlight ? "rgba(245,197,24,0.025)" : "#0c0f18", boxShadow: planItem.highlight ? "0 0 40px rgba(245,197,24,0.07)" : "none" }}
+                data-animate data-delay={planItem.delay}>
+                {planItem.popular && (
                   <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-[#f5c518] text-[#080a10] text-xs font-extrabold whitespace-nowrap"
                     style={{ boxShadow: "0 0 20px rgba(245,197,24,0.5)" }}>
                     MOST POPULAR
                   </div>
                 )}
                 <div className="mb-5">
-                  <h3 className="text-xl font-bold text-white">{plan.name}</h3>
-                  <p className="text-[#6b7280] text-sm">{plan.sub}</p>
+                  <h3 className="text-xl font-bold text-white">{planItem.name}</h3>
+                  <p className="text-[#6b7280] text-sm">{planItem.sub}</p>
                 </div>
                 <div className="mb-1">
-                  <span className="text-[40px] font-extrabold leading-none" style={{ color: plan.highlight ? "#f5c518" : "white" }}>{plan.price}</span>
-                  <span className="text-[#6b7280] text-sm">{plan.period}</span>
+                  <span className="text-[40px] font-extrabold leading-none" style={{ color: planItem.highlight ? "#f5c518" : "white" }}>{planItem.price}</span>
+                  <span className="text-[#6b7280] text-sm">{planItem.period}</span>
                 </div>
-                {plan.was && <p className="text-[#4b5563] text-sm line-through">{plan.was}</p>}
-                <p className="text-sm mb-6 mt-0.5" style={{ color: plan.noteColor }}>{plan.note}</p>
-                <ul className="space-y-2.5 mb-7">
-                  {plan.features.map((f) => <li key={f} className="flex items-start gap-2 text-sm text-white"><Check />{f}</li>)}
-                  {plan.disabled?.map((f) => <li key={f} className="flex items-start gap-2 text-sm text-[#4b5563]"><XIcon />{f}</li>)}
+                <p className="text-sm mb-6 mt-1" style={{ color: planItem.noteColor }}>{planItem.note}</p>
+                <ul className="space-y-2 mb-7">
+                  {planItem.features.map((f) => <li key={f} className="flex items-start gap-2 text-sm text-white"><Check />{f}</li>)}
                 </ul>
-                <button className="w-full py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
-                  style={plan.highlight ? { background: "#f5c518", color: "#080a10", boxShadow: "0 0 22px rgba(245,197,24,0.4)" } : { border: "1px solid rgba(255,255,255,0.14)", color: "white" }}>
-                  {plan.cta}
+                <button
+                  onClick={() => {
+                    if (planItem.highlight && clientId) {
+                      fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+                        .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
+                    }
+                  }}
+                  className="w-full py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
+                  style={planItem.highlight ? { background: "#f5c518", color: "#080a10", boxShadow: "0 0 22px rgba(245,197,24,0.4)" } : { border: "1px solid rgba(255,255,255,0.14)", color: "white" }}>
+                  {planItem.cta}
                 </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── TESTIMONIALS ────────────────────────────────────── */}
+      <section className="py-24 px-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14" data-animate>
+            <SectionBadge>WHAT TRADERS SAY</SectionBadge>
+            <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
+              Real traders. <span className="text-[#f5c518]">Real results.</span>
+            </h2>
+          </div>
+          <div className="grid md:grid-cols-3 gap-6">
+            {[
+              {
+                quote: "The confidence score is a game changer. I used to second-guess every entry. Now if the AI gives me 80%+, I know the setup is clean. Went from 48% win rate to 67% in 6 weeks.",
+                name: "James R.",
+                role: "Forex trader · 3 years",
+                delay: "1",
+              },
+              {
+                quote: "The journal auto-save alone is worth it. I used to forget to log trades and had no idea if I was actually profitable. Now I can see my win rate in real time and it's pushed me to be more selective.",
+                name: "Sophie M.",
+                role: "Crypto & indices trader",
+                delay: "2",
+              },
+              {
+                quote: "Multi-timeframe analysis changed how I trade. I was getting stopped out constantly until ChartIQ showed me I was trading against the 4H trend. The economic calendar also saved me from trading straight into NFP twice.",
+                name: "Daniel K.",
+                role: "Full-time trader · Pro plan",
+                delay: "3",
+              },
+            ].map((t) => (
+              <div key={t.name} className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay={t.delay}>
+                <div className="flex gap-0.5">
+                  {[0,1,2,3,4].map((i) => (
+                    <svg key={i} width="14" height="14" viewBox="0 0 14 14" fill="#f5c518"><path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/></svg>
+                  ))}
+                </div>
+                <p className="text-[#9ca3af] text-sm leading-relaxed flex-1">&ldquo;{t.quote}&rdquo;</p>
+                <div>
+                  <p className="text-white text-sm font-bold">{t.name}</p>
+                  <p className="text-[#6b7280] text-xs mt-0.5">{t.role}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -2004,19 +2235,18 @@ export default function App() {
       {/* ── CTA BAND ────────────────────────────────────────── */}
       <section className="cta-gradient py-28 px-6">
         <div className="max-w-4xl mx-auto text-center" data-animate>
-          <h2 className="text-5xl md:text-[60px] font-extrabold leading-tight tracking-tight mb-6">
-            The Edge You've Been<br /><span className="text-[#f5c518]">Missing</span>
+          <h2 className="font-bebas text-[clamp(52px,8vw,88px)] leading-none tracking-[0.03em] text-white mb-4">
+            STOP GUESSING.<br /><span className="text-[#00e676]">START TRADING.</span>
           </h2>
-          <p className="text-[#c4b5fd] text-lg mb-10 max-w-sm mx-auto leading-relaxed">
-            Start trading with clarity, confidence, and speed.
+          <p className="text-[#9ca3af] text-lg mb-10 max-w-md mx-auto leading-relaxed mt-6">
+            Join thousands of traders using AI to read charts faster and smarter.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-10">
-            <button className="btn-outline px-8 py-3.5 text-sm">View Pricing →</button>
-            <a href="#analyze" className="btn-yellow px-8 py-3.5 text-sm flex items-center gap-2">⚡ Analyze My Chart</a>
-            <button className="btn-outline px-8 py-3.5 text-sm">▶ Watch Demo</button>
+            <a href="#analyze" className="btn-yellow px-8 py-3.5 text-sm flex items-center gap-2">⚡ Start free — no card needed</a>
+            <a href="#how-it-works" className="btn-outline px-8 py-3.5 text-sm">See it in action →</a>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-6 text-[#00e676] text-sm">
-            {["🔒 Secure payments", "🛡 30-day guarantee", "⚡ Instant access", "💬 24/7 support"].map((t) => (
+          <div className="flex flex-wrap items-center justify-center gap-6 text-[#6b7280] text-sm">
+            {["🔒 No credit card required", "⚡ 3 free analyses daily", "📊 Works with any platform"].map((t) => (
               <span key={t}>{t}</span>
             ))}
           </div>
