@@ -1,5 +1,8 @@
+import { NextResponse } from "next/server";
 import { getSupabase } from "@/app/lib/supabase";
 import type { Outcome } from "@/app/lib/supabase";
+
+export const dynamic = "force-dynamic";
 
 export async function PATCH(
   req: Request,
@@ -8,18 +11,44 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await req.json();
-    const update: { outcome?: Outcome | null; notes?: string } = {};
 
-    if ("outcome" in body) update.outcome = body.outcome;
-    if ("notes"   in body) update.notes   = body.notes;
+    const patch: Record<string, unknown> = {};
+    if ("outcome" in body) patch.outcome = (body.outcome as Outcome) || null;
+    if ("notes"   in body) patch.notes   = body.notes ?? "";
 
-    const supabase = getSupabase();
-    const { error } = await supabase.from("journal").update(update).eq("id", id);
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ success: true });
+    }
+
+    const { error } = await getSupabase()
+      .from("journal")
+      .update(patch)
+      .eq("id", id);
 
     if (error) throw error;
-    return Response.json({ success: true });
+    return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Update failed";
-    return Response.json({ success: false, error: msg }, { status: 500 });
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    const { error } = await getSupabase()
+      .from("journal")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+    return NextResponse.json({ success: true });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Delete failed";
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }

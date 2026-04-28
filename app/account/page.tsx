@@ -6,9 +6,9 @@ import Link from "next/link";
 
 function LogoMark() {
   return (
-    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#7c3aed] to-[#4338ca] flex items-center justify-center flex-shrink-0">
+    <div className="w-8 h-8 rounded-full bg-[#00e676] flex items-center justify-center flex-shrink-0">
       <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-        <path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="white" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="#080a10" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </div>
   );
@@ -103,7 +103,7 @@ export default function Account() {
         <div className="max-w-lg mx-auto">
 
           <div className="mb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#7c3aed]/30 bg-[#7c3aed]/10 text-[#a78bfa] text-xs font-semibold tracking-[0.13em] uppercase mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#00e676]/30 bg-[#00e676]/10 text-[#00e676] text-xs font-semibold tracking-[0.13em] uppercase mb-4">
               Account
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight">Your Plan</h1>
@@ -205,8 +205,8 @@ export default function Account() {
 
               {/* Pro features */}
               {!isPro && (
-                <div className="rounded-2xl p-6 border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04]">
-                  <p className="text-[#a78bfa] text-[10px] uppercase tracking-[0.12em] font-semibold mb-3">
+                <div className="rounded-2xl p-6 border border-[#00e676]/20 bg-[#00e676]/[0.04]">
+                  <p className="text-[#00e676] text-[10px] uppercase tracking-[0.12em] font-semibold mb-3">
                     Pro includes
                   </p>
                   <ul className="space-y-2">
@@ -218,7 +218,7 @@ export default function Account() {
                     ].map((f) => (
                       <li key={f} className="flex items-center gap-2 text-sm text-[#d1d5db]">
                         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" className="flex-shrink-0">
-                          <path d="M2 6.5l3 3L11 2.5" stroke="#7c3aed" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M2 6.5l3 3L11 2.5" stroke="#00e676" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                         {f}
                       </li>

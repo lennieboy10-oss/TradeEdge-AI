@@ -1,0 +1,9 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "functions": {
+    "app/api/analyze/route.ts": { "maxDuration": 120 },
+    "app/api/chat/route.ts":    { "maxDuration": 60  }
+  }
+}

@@ -9,25 +9,248 @@ type AnalysisResult = {
   confidence: number;
   timeframe: string;
   summary: string;
-  tradeSetup: {
-    entry: string;
-    entryType: string;
-    stopLoss: string;
-    takeProfit1: string;
-    riskReward: string;
-  };
-  keyLevels: {
-    resistance: string[];
-    support: string[];
-  };
-  indicators: {
-    rsi: string;
-    macd: string;
-    maCross: string;
-  };
+  tradeSetup: { entry: string; entryType: string; stopLoss: string; takeProfit1: string; riskReward: string };
+  keyLevels:  { resistance: string[]; support: string[] };
+  indicators: { rsi: string; macd: string; maCross: string };
   confluences: string[];
   warnings: string[];
 };
+
+type MultiResult = {
+  analyses:  { current: AnalysisResult; higher: AnalysisResult; highest: AnalysisResult };
+  tfLabels:  { current: string; higher: string; highest: string };
+  confluence: { score: number; total: number; label: string; color: string; detail: string };
+};
+
+type ChatMsg = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
+// ── Economic calendar types + helpers ─────────────────────────
+type CalEvent = {
+  title: string;
+  country: string;
+  date: string;
+  time: string;
+  impact: "High" | "Medium" | "Low";
+  forecast: string;
+  previous: string;
+};
+
+// Times from faireconomy.media are in UTC
+function parseCalDate(dateStr: string, timeStr: string): Date | null {
+  if (!timeStr || /all.?day|tentative/i.test(timeStr.trim())) return null;
+  const mdy = dateStr.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  const ymd = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  let y: number, mo: number, d: number;
+  if (mdy) { mo = +mdy[1]; d = +mdy[2]; y = +mdy[3]; }
+  else if (ymd) { y = +ymd[1]; mo = +ymd[2]; d = +ymd[3]; }
+  else return null;
+  const [h, m = 0] = timeStr.split(":").map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, m, 0));
+}
+
+function calMinutesFromNow(e: CalEvent): number | null {
+  const dt = parseCalDate(e.date, e.time);
+  if (!dt) return null;
+  return Math.round((dt.getTime() - Date.now()) / 60_000);
+}
+
+function fmtCalCountdown(min: number): string {
+  if (min <= 0) return "NOW";
+  if (min < 60) return `in ${min}m`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m > 0 ? `in ${h}h ${m}m` : `in ${h}h`;
+}
+
+const CAL_FLAGS: Record<string, string> = {
+  USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", JPY: "🇯🇵",
+  AUD: "🇦🇺", CAD: "🇨🇦", NZD: "🇳🇿", CHF: "🇨🇭",
+  CNY: "🇨🇳", XAU: "🥇", BTC: "₿",
+};
+
+function extractPairCurrencies(asset: string | null): string[] {
+  if (!asset) return [];
+  const up = asset.toUpperCase().replace(/\s/g, "");
+  if (up.includes("/")) return up.split("/").map((s) => s.replace(/[^A-Z]/g, "").slice(0, 3)).filter(Boolean);
+  if (/^[A-Z]{6}$/.test(up)) return [up.slice(0, 3), up.slice(3, 6)];
+  if (up.includes("XAU") || up.includes("GOLD")) return ["USD"];
+  if (up.includes("OIL") || up.includes("WTI") || up.includes("BRENT")) return ["USD", "CAD"];
+  if (/^[A-Z]{2,5}$/.test(up)) return ["USD"]; // stocks
+  return ["USD"];
+}
+
+// ── Calendar strip (shown above upload zone) ───────────────────
+function CalendarStrip({ events }: { events: CalEvent[] }) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  const chips = events
+    .filter((e) => e.impact === "High")
+    .map((e) => ({ ...e, min: calMinutesFromNow(e) }))
+    .filter((e) => e.min !== null && e.min > -60 && e.min <= 24 * 60)
+    .sort((a, b) => (a.min ?? 9999) - (b.min ?? 9999))
+    .slice(0, 5);
+
+  if (chips.length === 0) return null;
+
+  const expandedChip = expandedIdx !== null ? chips[expandedIdx] : null;
+
+  return (
+    <div className="mb-6 card-dark p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+          <rect x="1" y="1.5" width="9" height="8.5" rx="1.5" stroke="#6b7280" strokeWidth="1.1"/>
+          <path d="M3.5 1V2.5M7.5 1V2.5M1 4h9" stroke="#6b7280" strokeWidth="1.1" strokeLinecap="round"/>
+        </svg>
+        <p className="font-dm-mono text-[10px] font-semibold uppercase tracking-[0.15em] text-[#6b7280]">
+          Upcoming High Impact News
+        </p>
+        <a href="/calendar" className="ml-auto font-dm-mono text-[10px] text-[#4b5563] hover:text-[#9ca3af] transition-colors">
+          Full calendar →
+        </a>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+        {chips.map((e, i) => {
+          const urgent  = e.min! < 60;
+          const caution = e.min! < 240;
+          const color  = urgent ? "#f87171" : caution ? "#f59e0b" : "#00e676";
+          const bg     = urgent ? "rgba(248,113,113,0.1)" : caution ? "rgba(245,158,11,0.1)" : "rgba(0,230,118,0.1)";
+          const border = urgent ? "rgba(248,113,113,0.3)" : caution ? "rgba(245,158,11,0.3)" : "rgba(0,230,118,0.3)";
+          const isOpen = expandedIdx === i;
+          return (
+            <button key={i}
+              onClick={() => setExpandedIdx(isOpen ? null : i)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl whitespace-nowrap font-dm-mono text-xs font-medium transition-all duration-150 hover:-translate-y-0.5 flex-shrink-0"
+              style={{ background: isOpen ? bg.replace("0.1", "0.2") : bg, border: `1px solid ${border}`, color }}>
+              <span>{CAL_FLAGS[e.country] ?? e.country}</span>
+              <span style={{ color: "rgba(255,255,255,0.85)", maxWidth: "100px", overflow: "hidden", textOverflow: "ellipsis" }}>{e.title}</span>
+              <span>·</span>
+              <span>{fmtCalCountdown(e.min!)}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {expandedChip && (
+        <motion.div
+          key={expandedIdx}
+          initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.15 }}
+          className="mt-2 px-4 py-3 rounded-xl font-dm-mono text-xs"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
+        >
+          <p className="text-white font-semibold mb-1">
+            {expandedChip.title}{" "}
+            <span className="text-[#6b7280]">· {expandedChip.country}</span>
+          </p>
+          <div className="flex flex-wrap gap-5 text-[#6b7280]">
+            {expandedChip.forecast && <span>Forecast <span className="text-white">{expandedChip.forecast}</span></span>}
+            {expandedChip.previous && <span>Previous <span className="text-white">{expandedChip.previous}</span></span>}
+          </div>
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
+// ── News warning banner (shown in results when event imminent) ─
+function NewsWarningBanner({ events, asset }: { events: CalEvent[]; asset: string }) {
+  const pairCurrencies = extractPairCurrencies(asset);
+  const warnings = events
+    .filter((e) => {
+      if (e.impact !== "High") return false;
+      if (!pairCurrencies.includes(e.country)) return false;
+      const min = calMinutesFromNow(e);
+      return min !== null && min > -60 && min <= 120;
+    })
+    .map((e) => ({ ...e, min: calMinutesFromNow(e)! }))
+    .sort((a, b) => a.min - b.min);
+
+  if (warnings.length === 0) return null;
+
+  const first = warnings[0];
+  const minStr = first.min <= 0 ? "NOW" : first.min < 60 ? `${first.min} MINUTES` : `${Math.ceil(first.min / 60)} HOURS`;
+
+  return (
+    <div className="rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/[0.07] p-3.5 mb-4 flex items-start gap-3">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0 mt-0.5">
+        <path d="M8 2L1.5 13.5h13L8 2z" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M8 6.5v3.5M8 11.5v.5" stroke="#f59e0b" strokeWidth="1.4" strokeLinecap="round"/>
+      </svg>
+      <div className="flex-1 min-w-0">
+        <p className="text-[#f59e0b] text-xs font-bold uppercase tracking-[0.1em] mb-0.5 font-dm-mono">
+          HIGH IMPACT NEWS IN {minStr}
+        </p>
+        <p className="text-[#fcd34d] text-xs leading-relaxed">
+          {warnings.map((w) => `${w.title} (${w.country})`).join(" · ")} · Consider waiting for the news candle to close before entering this trade.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Position calculator ────────────────────────────────────────
+type CalcAssetType = "forex" | "crypto" | "stocks" | "gold";
+type CalcCurrency  = "GBP" | "USD" | "EUR";
+const CURRENCY_SYMBOLS: Record<CalcCurrency, string> = { GBP: "£", USD: "$", EUR: "€" };
+
+function detectCalcAsset(asset: string): CalcAssetType {
+  const up = (asset ?? "").toUpperCase().replace(/\s/g, "");
+  if (up.includes("XAU") || up.includes("GOLD") || up.includes("OIL") || up.includes("WTI")) return "gold";
+  const cryptoKeys = ["BTC","ETH","SOL","DOGE","ADA","XRP","AVAX","LTC","LINK","DOT","BNB","MATIC"];
+  if (cryptoKeys.some((c) => up.includes(c))) return "crypto";
+  if (up.includes("/") || /^[A-Z]{6}$/.test(up)) return "forex";
+  return "stocks";
+}
+
+function parseNum(s: string): number {
+  const n = parseFloat(String(s ?? "").replace(/[^0-9.-]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+type CalcResult = { sizeLabel: string; profit1: number; rr1: number; marginRequired: number; slPips?: number };
+
+function doCalc(
+  type: CalcAssetType, riskAmt: number, entry: number, sl: number, tp: number, asset: string
+): CalcResult | null {
+  const slDist = Math.abs(entry - sl);
+  const tpDist = Math.abs(tp - entry);
+  if (slDist === 0 || entry === 0) return null;
+  const rr1 = tpDist / slDist;
+  if (type === "forex") {
+    const isJpy     = asset.toUpperCase().includes("JPY");
+    const pipSize   = isJpy ? 0.01 : 0.0001;
+    const pipPerLot = isJpy ? 1000 : 10;
+    const slPips    = slDist / pipSize;
+    const lots      = riskAmt / (slPips * pipPerLot);
+    return { sizeLabel: `${lots.toFixed(2)} lots`, profit1: (tpDist / pipSize) * pipPerLot * lots, rr1, marginRequired: lots * 100_000 * entry * 0.01, slPips };
+  }
+  if (type === "crypto") {
+    const up   = asset.toUpperCase().replace(/\s/g, "");
+    const coin = up.split("/")[0] || up.slice(0, 3);
+    const units = riskAmt / slDist;
+    return { sizeLabel: `${units.toFixed(4)} ${coin}`, profit1: tpDist * units, rr1, marginRequired: units * entry * 0.1 };
+  }
+  if (type === "stocks") {
+    const shares = Math.max(1, Math.floor(riskAmt / slDist));
+    return { sizeLabel: `${shares.toLocaleString()} shares`, profit1: tpDist * shares, rr1, marginRequired: shares * entry * 0.25 };
+  }
+  const oz = riskAmt / slDist;
+  return { sizeLabel: `${oz.toFixed(2)} oz`, profit1: tpDist * oz, rr1, marginRequired: oz * entry * 0.005 };
+}
+
+const QUICK_CHIPS = [
+  "What's the best entry for this setup?",
+  "Where should I set my stop loss?",
+  "Is this a high-probability trade?",
+  "What invalidates this setup?",
+  "What's the risk/reward here?",
+];
+
+const TF_OPTIONS = ["1m", "5m", "15m", "30m", "1H", "4H", "Daily", "Weekly"] as const;
 
 // ── Tiny shared pieces ─────────────────────────────────────────
 
@@ -49,17 +272,47 @@ function XIcon() {
 
 function SectionBadge({ children }: { children: React.ReactNode }) {
   return (
-    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#7c3aed]/30 bg-[#7c3aed]/10 text-[#a78bfa] text-xs font-semibold tracking-[0.13em] uppercase mb-5">
+    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#00e676]/30 bg-[#00e676]/10 text-[#00e676] text-xs font-semibold tracking-[0.13em] uppercase mb-5">
       {children}
+    </div>
+  );
+}
+
+function TimeframeSelector({ value, onChange }: { value: string; onChange: (tf: string) => void }) {
+  return (
+    <div className="mb-4">
+      <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">Chart Timeframe</p>
+      <div className="flex flex-wrap gap-1.5">
+        {TF_OPTIONS.map((tf) => (
+          <button
+            key={tf}
+            onClick={() => onChange(tf)}
+            className="font-dm-mono text-xs px-3 py-1.5 rounded-lg border transition-all duration-150"
+            style={value === tf ? {
+              background: "#00e676",
+              borderColor: "#00e676",
+              color: "#080a10",
+              fontWeight: 700,
+              boxShadow: "0 0 12px rgba(0,230,118,0.35)",
+            } : {
+              background: "rgba(255,255,255,0.03)",
+              borderColor: "rgba(255,255,255,0.09)",
+              color: "#6b7280",
+            }}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
 function LogoMark() {
   return (
-    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#7c3aed] to-[#4338ca] flex items-center justify-center flex-shrink-0">
+    <div className="w-8 h-8 rounded-full bg-[#00e676] flex items-center justify-center flex-shrink-0">
       <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-        <path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="white" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="#080a10" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </div>
   );
@@ -185,7 +438,7 @@ function ScanningLoader() {
           className="h-full rounded-full"
           style={{
             width: `${progress}%`,
-            background: "linear-gradient(90deg, #7c3aed, #00e676)",
+            background: "linear-gradient(90deg, #009e4f, #00e676)",
             boxShadow: "0 0 10px rgba(0,230,118,0.4)",
             transition: "width 0.08s linear",
           }}
@@ -363,13 +616,477 @@ function ScanLine({ color }: { color: string }) {
   );
 }
 
+// ── What-if scenarios ──────────────────────────────────────────
+function WhatIfScenarios({
+  balance, sym, asset, assetType, entryVal, slVal, tp1Val,
+}: {
+  balance: number; sym: string; asset: string; assetType: CalcAssetType;
+  entryVal: number; slVal: number; tp1Val: number;
+}) {
+  return (
+    <div>
+      <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#6b7280] font-semibold mb-3">
+        What If Scenarios
+      </p>
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Conservative", riskPct: 0.5, color: "#4ade80" },
+          { label: "Standard",     riskPct: 1,   color: "#00e676" },
+          { label: "Aggressive",   riskPct: 2,   color: "#f59e0b" },
+        ].map((sc) => {
+          const riskAmt = balance * sc.riskPct / 100;
+          const calc    = doCalc(assetType, riskAmt, entryVal, slVal, tp1Val, asset);
+          return (
+            <div key={sc.label} className="rounded-xl p-3 text-center"
+              style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <p className="font-dm-mono text-[9px] uppercase tracking-wider text-[#6b7280] mb-1.5">{sc.label}</p>
+              <p className="font-dm-mono text-[10px] font-bold mb-1.5" style={{ color: sc.color }}>{sc.riskPct}% risk</p>
+              <p className="font-dm-mono text-xs font-bold text-white truncate">{calc?.sizeLabel ?? "—"}</p>
+              <p className="font-dm-mono text-xs mt-1 text-[#00e676]">+{sym}{(calc?.profit1 ?? 0).toFixed(0)}</p>
+              <p className="font-dm-mono text-xs text-[#f87171]">-{sym}{riskAmt.toFixed(0)}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Position calculator panel ──────────────────────────────────
+function PositionCalculator({
+  defaultEntry, defaultSL, defaultTP1, asset, isPro, clientId,
+}: {
+  defaultEntry: string; defaultSL: string; defaultTP1: string;
+  asset: string; isPro: boolean; clientId: string | null;
+}) {
+  const [balance, setBalance]     = useState("10000");
+  const [currency, setCurrency]   = useState<CalcCurrency>("GBP");
+  const [riskPct, setRiskPct]     = useState(1);
+  const [entryStr, setEntryStr]   = useState(defaultEntry);
+  const [slStr, setSlStr]         = useState(defaultSL);
+  const [tp1Str, setTp1Str]       = useState(defaultTP1);
+  const [assetType, setAssetType] = useState<CalcAssetType>(detectCalcAsset(asset));
+
+  useEffect(() => {
+    const b = localStorage.getItem("ciq_calc_balance");
+    const c = localStorage.getItem("ciq_calc_currency");
+    if (b) setBalance(b);
+    if (c) setCurrency(c as CalcCurrency);
+  }, []);
+  useEffect(() => { localStorage.setItem("ciq_calc_balance", balance); }, [balance]);
+  useEffect(() => { localStorage.setItem("ciq_calc_currency", currency); }, [currency]);
+  useEffect(() => { setEntryStr(defaultEntry); }, [defaultEntry]);
+  useEffect(() => { setSlStr(defaultSL); }, [defaultSL]);
+  useEffect(() => { setTp1Str(defaultTP1); }, [defaultTP1]);
+  useEffect(() => { setAssetType(detectCalcAsset(asset)); }, [asset]);
+
+  const sym        = CURRENCY_SYMBOLS[currency];
+  const balVal     = parseNum(balance);
+  const riskAmount = balVal * riskPct / 100;
+  const entryVal   = parseNum(entryStr);
+  const slVal      = parseNum(slStr);
+  const tp1Val     = parseNum(tp1Str);
+  const calc       = (balVal > 0 && entryVal > 0 && slVal > 0 && tp1Val > 0)
+    ? doCalc(assetType, riskAmount, entryVal, slVal, tp1Val, asset)
+    : null;
+
+  const slDist   = Math.abs(entryVal - slVal);
+  const tp1Dist  = Math.abs(tp1Val - entryVal);
+  const totalD   = slDist + tp1Dist;
+  const slBarPct = totalD > 0 ? (slDist / totalD) * 100 : 50;
+  const tpBarPct = 100 - slBarPct;
+
+  const inputBase = "w-full px-3 py-2.5 rounded-xl font-dm-mono text-sm text-white focus:outline-none transition-colors";
+
+  function upgradeFn() {
+    if (!clientId) return;
+    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+      .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      className="mt-4 p-6 rounded-2xl"
+      style={{ background: "#0d1310", border: "1px solid rgba(0,230,118,0.14)" }}
+    >
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <h3 className="font-bebas text-[22px] tracking-[0.08em] text-white">POSITION CALCULATOR</h3>
+        <div className="flex gap-1.5 flex-wrap">
+          {(["forex", "crypto", "stocks", "gold"] as const).map((t) => (
+            <button key={t} onClick={() => setAssetType(t)}
+              className="font-dm-mono text-[10px] uppercase px-2.5 py-1.5 rounded-lg border transition-all"
+              style={assetType === t
+                ? { background: "#00e676", color: "#080a10", borderColor: "#00e676", fontWeight: 700 }
+                : { background: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.07)", color: "#6b7280" }}>
+              {t === "gold" ? "XAU" : t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Inputs */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="col-span-2">
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#6b7280] font-semibold mb-1.5">Account Balance</p>
+          <div className="flex gap-2">
+            <select value={currency} onChange={(e) => setCurrency(e.target.value as CalcCurrency)}
+              className="px-2.5 py-2.5 rounded-xl font-dm-mono text-xs font-bold text-[#00e676] focus:outline-none cursor-pointer"
+              style={{ background: "rgba(0,230,118,0.08)", border: "1px solid rgba(0,230,118,0.2)" }}>
+              {(["GBP", "USD", "EUR"] as const).map((c) => (
+                <option key={c} value={c}>{CURRENCY_SYMBOLS[c]} {c}</option>
+              ))}
+            </select>
+            <input type="number" value={balance} onChange={(e) => setBalance(e.target.value)}
+              placeholder="10000"
+              className={`${inputBase} flex-1 focus:border-[#00e676]/60`}
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
+          </div>
+        </div>
+
+        <div className="col-span-2">
+          <div className="flex justify-between items-center mb-1.5">
+            <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#6b7280] font-semibold">Risk %</p>
+            <span className="font-dm-mono text-[11px] font-bold text-[#00e676]">{riskPct}% = {sym}{riskAmount.toFixed(0)} at risk</span>
+          </div>
+          <input type="range" min="0.5" max="5" step="0.5" value={riskPct}
+            onChange={(e) => setRiskPct(parseFloat(e.target.value))}
+            className="w-full h-2 rounded-full appearance-none cursor-pointer"
+            style={{ accentColor: "#00e676" }} />
+          <div className="flex justify-between font-dm-mono text-[9px] text-[#4b5563] mt-1">
+            {["0.5%","1%","2%","3%","4%","5%"].map((v) => <span key={v}>{v}</span>)}
+          </div>
+        </div>
+
+        <div>
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#6b7280] font-semibold mb-1.5">Entry</p>
+          <input type="text" value={entryStr} onChange={(e) => setEntryStr(e.target.value)}
+            className={`${inputBase} focus:border-[#00e676]/60`}
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
+        </div>
+
+        <div>
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#f87171] font-semibold mb-1.5">Stop Loss</p>
+          <input type="text" value={slStr} onChange={(e) => setSlStr(e.target.value)}
+            className={`${inputBase} focus:border-[#f87171]/60`}
+            style={{ background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.14)" }} />
+        </div>
+
+        <div className="col-span-2">
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#4ade80] font-semibold mb-1.5">Take Profit</p>
+          <input type="text" value={tp1Str} onChange={(e) => setTp1Str(e.target.value)}
+            className={`${inputBase} focus:border-[#4ade80]/60`}
+            style={{ background: "rgba(74,222,128,0.04)", border: "1px solid rgba(74,222,128,0.14)" }} />
+        </div>
+      </div>
+
+      {/* Results */}
+      {calc ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl p-4 text-center"
+              style={{ background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.15)" }}>
+              <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#f87171] font-semibold mb-1">Max Loss</p>
+              <p className="font-dm-mono text-[26px] font-bold text-[#f87171] leading-none">{sym}{riskAmount.toFixed(2)}</p>
+              <p className="font-dm-mono text-[10px] text-[#4b5563] mt-1">{riskPct}% of balance</p>
+            </div>
+            <div className="rounded-2xl p-4 text-center"
+              style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
+              <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#00e676] font-semibold mb-1">Potential Profit</p>
+              <p className="font-dm-mono text-[26px] font-bold text-[#00e676] leading-none">{sym}{calc.profit1.toFixed(2)}</p>
+              <p className="font-dm-mono text-[10px] text-[#4b5563] mt-1">RR 1:{calc.rr1.toFixed(2)}</p>
+            </div>
+          </div>
+
+          <div className={`grid gap-3 ${assetType === "forex" ? "grid-cols-3" : "grid-cols-2"}`}>
+            <div className="rounded-xl p-3 text-center"
+              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Position Size</p>
+              <p className="font-dm-mono text-sm font-bold text-white">{calc.sizeLabel}</p>
+            </div>
+            {assetType === "forex" && calc.slPips !== undefined && (
+              <div className="rounded-xl p-3 text-center"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">SL Pips</p>
+                <p className="font-dm-mono text-sm font-bold text-white">{calc.slPips.toFixed(0)}</p>
+              </div>
+            )}
+            <div className="rounded-xl p-3 text-center"
+              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Margin Est.</p>
+              <p className="font-dm-mono text-sm font-bold text-white">{sym}{calc.marginRequired.toFixed(0)}</p>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex justify-between font-dm-mono text-[10px] mb-1.5">
+              <span className="text-[#f87171]">Risk {slBarPct.toFixed(0)}%</span>
+              <span className="text-[#6b7280]">Risk vs Reward</span>
+              <span className="text-[#00e676]">Reward {tpBarPct.toFixed(0)}%</span>
+            </div>
+            <div className="h-3 rounded-full overflow-hidden flex">
+              <div className="h-full" style={{ width: `${slBarPct}%`, background: "linear-gradient(90deg, #dc2626, #f87171)" }} />
+              <div className="h-full" style={{ width: `${tpBarPct}%`, background: "linear-gradient(90deg, #4ade80, #00e676)" }} />
+            </div>
+          </div>
+
+          {isPro ? (
+            <WhatIfScenarios balance={balVal} sym={sym} asset={asset} assetType={assetType}
+              entryVal={entryVal} slVal={slVal} tp1Val={tp1Val} />
+          ) : (
+            <div className="relative rounded-xl overflow-hidden"
+              style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center px-4"
+                style={{ backdropFilter: "blur(6px)", background: "rgba(8,10,16,0.75)" }}>
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none" className="mb-2">
+                  <rect x="2.5" y="9.5" width="17" height="11" rx="2.5" stroke="#00e676" strokeWidth="1.3"/>
+                  <path d="M7 9.5V7a4 4 0 018 0v2.5" stroke="#00e676" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
+                <p className="text-white text-xs font-bold mb-1">Pro Feature</p>
+                <p className="text-[#6b7280] text-[11px] mb-3">Upgrade to unlock What If scenarios</p>
+                <button onClick={upgradeFn}
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold transition-all hover:-translate-y-0.5"
+                  style={{ background: "#00e676", color: "#080a10" }}>
+                  Upgrade to Pro
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-3 p-4 pointer-events-none select-none" style={{ filter: "blur(4px)" }}>
+                {["Conservative","Standard","Aggressive"].map((s) => (
+                  <div key={s} className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.025)" }}>
+                    <p className="font-dm-mono text-[9px] text-[#6b7280] mb-1">{s}</p>
+                    <p className="font-dm-mono text-sm font-bold text-white">0.12 lots</p>
+                    <p className="font-dm-mono text-xs text-[#00e676]">+{sym}480</p>
+                    <p className="font-dm-mono text-xs text-[#f87171]">-{sym}100</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-white/[0.07] p-6 text-center">
+          <p className="font-dm-mono text-[#4b5563] text-xs">Enter entry, stop loss and take profit to see your position size</p>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ── Follow-up chat ─────────────────────────────────────────────
+function ChatBox({ journalId, analysisJson, chartBase64, chartMime, clientId, isPro }: {
+  journalId: string | null;
+  analysisJson: unknown;
+  chartBase64: string | null;
+  chartMime: string;
+  clientId: string | null;
+  isPro: boolean;
+}) {
+  const [messages, setMessages]       = useState<ChatMsg[]>([]);
+  const [input, setInput]             = useState("");
+  const [streaming, setStreaming]     = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const [limitReached, setLimitReached]   = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streamingText]);
+
+  async function send(text: string) {
+    if (!text.trim() || streaming) return;
+    setInput("");
+
+    const userMsg: ChatMsg = { id: crypto.randomUUID(), role: "user", content: text };
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
+    setStreaming(true);
+    setStreamingText("");
+
+    const isFirst = messages.length === 0;
+    const chatHistory = messages.map((m) => ({ role: m.role, content: m.content }));
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          analysisJson,
+          imageBase64: isFirst ? chartBase64 : null,
+          imageMime:   isFirst ? chartMime   : null,
+          chatHistory,
+          clientId,
+          journalId,
+        }),
+      });
+
+      if (res.status === 429) {
+        setLimitReached(true);
+        setStreaming(false);
+        return;
+      }
+
+      const reader  = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let full = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const lines = decoder.decode(value).split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6);
+          if (raw === "[DONE]") break;
+          try {
+            const { text: t } = JSON.parse(raw);
+            if (t) { full += t; setStreamingText(full); }
+          } catch { /* skip */ }
+        }
+      }
+
+      if (full) {
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: full }]);
+      }
+    } catch (err) {
+      console.error("[chat]", err);
+    } finally {
+      setStreaming(false);
+      setStreamingText("");
+    }
+  }
+
+  const assistantCount = messages.filter((m) => m.role === "assistant").length;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 28 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+      className="mt-6 card-dark p-6"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-base font-bold text-white">Ask a Follow-up Question</h3>
+          <p className="text-[#6b7280] text-xs mt-0.5">Chat with AI about this specific chart</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <circle cx="6" cy="6" r="5" stroke="#00e676" strokeWidth="1.2"/>
+            <path d="M4 6l1.5 1.5L8 4" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span className="font-dm-mono text-[10px] font-semibold" style={{ color: "#00e676" }}>Powered by Claude AI</span>
+        </div>
+      </div>
+
+      {/* Messages */}
+      {messages.length > 0 && (
+        <div className="mb-4 space-y-3 max-h-72 overflow-y-auto pr-1">
+          {messages.map((m) => (
+            <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
+                style={m.role === "user"
+                  ? { background: "#00e676", color: "#080a10", fontWeight: 600 }
+                  : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "#d1d5db" }}
+              >
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {streaming && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "#d1d5db" }}>
+                {streamingText
+                  ? <>{streamingText}<span className="inline-block w-[3px] h-[14px] bg-[#00e676] ml-0.5 rounded-sm" style={{ animation: "pulse 1s ease infinite" }} /></>
+                  : <span className="flex gap-1.5 items-center py-0.5">{[0,1,2].map((i) => <span key={i} className="w-1.5 h-1.5 rounded-full bg-[#4b5563] animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}</span>
+                }
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      )}
+
+      {/* Quick chips — shown only before first message */}
+      {messages.length === 0 && !limitReached && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {QUICK_CHIPS.map((chip) => (
+            <button key={chip} onClick={() => send(chip)}
+              className="text-xs px-3 py-1.5 rounded-full border border-white/[0.10] bg-white/[0.03] text-[#9ca3af] hover:border-[#00e676]/40 hover:text-white transition-all duration-150">
+              {chip}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Limit gate */}
+      {limitReached && (
+        <div className="mb-4 rounded-xl border border-[#00e676]/20 bg-[#00e676]/[0.06] p-4 text-center">
+          <p className="text-white text-sm font-bold mb-1">Upgrade to Pro for unlimited chat</p>
+          <p className="text-[#6b7280] text-xs mb-3">Free users get 1 AI response per analysis.</p>
+          <button
+            onClick={() => clientId && fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) }).then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; })}
+            className="px-5 py-2 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
+            style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 18px rgba(0,230,118,0.28)" }}>
+            Upgrade to Pro — £19/mo
+          </button>
+        </div>
+      )}
+
+      {/* Input row */}
+      {!limitReached && (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
+            placeholder="Ask about this chart…"
+            disabled={streaming}
+            className="flex-1 px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#00e676]/60 transition-colors disabled:opacity-50"
+          />
+          <button
+            onClick={() => send(input)}
+            disabled={!input.trim() || streaming}
+            className="px-4 py-2.5 rounded-xl font-bold transition-all duration-150 disabled:opacity-40 flex items-center justify-center"
+            style={{ background: "#00e676", color: "#080a10", minWidth: "44px" }}>
+            {streaming
+              ? <span className="w-4 h-4 rounded-full border-2 border-[#080a10]/25 border-t-[#080a10] animate-spin-btn" />
+              : <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M10 4l4 4-4 4" stroke="#080a10" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            }
+          </button>
+        </div>
+      )}
+
+      {/* Free tier note */}
+      {!isPro && !limitReached && assistantCount === 0 && (
+        <p className="text-[#4b5563] text-[11px] mt-2 text-center">
+          Free: 1 AI response per analysis ·{" "}
+          <button
+            onClick={() => clientId && fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) }).then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; })}
+            className="text-[#00e676] hover:underline">
+            Upgrade for unlimited
+          </button>
+        </p>
+      )}
+    </motion.div>
+  );
+}
+
 // ── Main app ───────────────────────────────────────────────────
 export default function App() {
   const [file, setFile]             = useState<File | null>(null);
   const [preview, setPreview]       = useState<string | null>(null);
   const [asset, setAsset]           = useState("");
+  const [selectedTF, setSelectedTF] = useState("1H");
+  const [activeTab, setActiveTab]   = useState<"current" | "higher" | "highest">("current");
   const [loading, setLoading]       = useState(false);
-  const [result, setResult]         = useState<AnalysisResult | null>(null);
+  const [result, setResult]         = useState<MultiResult | null>(null);
   const [error, setError]           = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -379,6 +1096,11 @@ export default function App() {
   const [clientId, setClientId]             = useState<string | null>(null);
   const [plan, setPlan]                     = useState("free");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [chartBase64, setChartBase64]   = useState<string | null>(null);
+  const [chartMime, setChartMime]       = useState("image/png");
+  const [journalId, setJournalId]       = useState<string | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<CalEvent[]>([]);
+  const [showCalculator, setShowCalculator] = useState(false);
 
   // Init client identity + usage from localStorage
   useEffect(() => {
@@ -400,6 +1122,17 @@ export default function App() {
       localStorage.setItem("ciq_date", today);
       localStorage.setItem("ciq_used", "0");
     }
+
+    // Pre-fill asset from URL param (?asset=BTC/USD)
+    const params = new URLSearchParams(window.location.search);
+    const preAsset = params.get("asset");
+    if (preAsset) setAsset(decodeURIComponent(preAsset));
+
+    // Fetch economic calendar (background, non-blocking)
+    fetch("/api/calendar")
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d.events)) setCalendarEvents(d.events); })
+      .catch(() => {});
 
     // Sync plan from server (background, non-blocking)
     fetch(`/api/user/plan?client_id=${id}`)
@@ -433,14 +1166,25 @@ export default function App() {
     setFile(f);
     setResult(null);
     setError(null);
+    setJournalId(null);
+    setChartBase64(null);
     if (preview) URL.revokeObjectURL(preview);
     setPreview(URL.createObjectURL(f));
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setChartBase64(dataUrl.split(",")[1]);
+      setChartMime(f.type || "image/png");
+    };
+    reader.readAsDataURL(f);
   }
 
   function clearFile() {
     setFile(null);
     setResult(null);
     setError(null);
+    setJournalId(null);
+    setChartBase64(null);
     if (preview) URL.revokeObjectURL(preview);
     setPreview(null);
     if (fileRef.current) fileRef.current.value = "";
@@ -458,9 +1202,13 @@ export default function App() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setJournalId(null);
+    setActiveTab("current");
+    setShowCalculator(false);
     const fd = new FormData();
     fd.append("file", file);
     fd.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone);
+    fd.append("timeframe", selectedTF);
     if (asset.trim())  fd.append("asset", asset.trim());
     if (clientId)      fd.append("client_id", clientId);
     try {
@@ -476,10 +1224,10 @@ export default function App() {
         return;
       }
 
-      if (data.success && data.analysis) {
-        setResult(data.analysis);
+      if (data.success && data.analyses) {
+        setResult({ analyses: data.analyses, tfLabels: data.tfLabels, confluence: data.confluence });
+        setJournalId(data.journalId ?? null);
         setRevealKey(k => k + 1);
-        // Pro users: no counter update needed
         if (!data.usage?.isPro) {
           const newUsed = data.usage?.used ?? usedToday + 1;
           const today   = new Date().toISOString().slice(0, 10);
@@ -497,13 +1245,21 @@ export default function App() {
     }
   }
 
+  const cur       = result?.analyses.current;
   const biasColor =
-    result?.bias === "BULLISH" ? "#00e676" :
-    result?.bias === "BEARISH" ? "#f87171" :
+    cur?.bias === "BULLISH" ? "#00e676" :
+    cur?.bias === "BEARISH" ? "#f87171" :
     "#f59e0b";
 
   const isPro    = plan === "pro";
-  const navLinks = ["Features", "How It Works", "Pricing", "Journal", "Account"];
+  const navLinks = ["Features", "How It Works", "Pricing", "Watchlist", "Calculator", "Calendar", "Journal", "Account"];
+
+  // Calendar urgent badge: HIGH impact event within 2 hours
+  const calHasUrgent = calendarEvents.some((e) => {
+    if (e.impact !== "High") return false;
+    const min = calMinutesFromNow(e);
+    return min !== null && min > 0 && min <= 120;
+  });
 
   return (
     <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden">
@@ -526,7 +1282,7 @@ export default function App() {
         </div>
         <nav className="flex flex-col px-6 pt-8 gap-1">
           {navLinks.map((l) => (
-            <a key={l} href={l === "Journal" ? "/journal" : `#${l.toLowerCase().replace(/ /g, "-")}`}
+            <a key={l} href={l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calculator" ? "/calculator" : l === "Calendar" ? "/calendar" : `#${l.toLowerCase().replace(/ /g, "-")}`}
               onClick={() => setMobileOpen(false)}
               className="text-lg font-semibold text-[#9ca3af] hover:text-white py-3 border-b border-white/[0.05] transition-colors">
               {l}
@@ -550,7 +1306,7 @@ export default function App() {
           </div>
           <div className="hidden md:flex items-center gap-7">
             {navLinks.map((l) => {
-              const href = l === "Journal" ? "/journal" : l === "Account" ? "/account" : `#${l.toLowerCase().replace(/ /g, "-")}`;
+              const href = l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calculator" ? "/calculator" : l === "Calendar" ? "/calendar" : `#${l.toLowerCase().replace(/ /g, "-")}`;
               return (
                 <a key={l} href={href} className="text-sm text-[#6b7280] hover:text-white transition-colors duration-150">
                   {l}
@@ -568,7 +1324,7 @@ export default function App() {
               </span>
             )}
             {/* Usage counter (free only) */}
-            {!isPro && usedToday > 0 && (
+            {!isPro && (
               <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.07]">
                 <div className="flex gap-[3px]">
                   {[0, 1, 2].map((i) => (
@@ -587,6 +1343,18 @@ export default function App() {
                 </span>
               </div>
             )}
+            {/* Calendar icon with urgent-event badge */}
+            <a href="/calendar"
+              className="hidden md:flex relative w-9 h-9 rounded-lg bg-white/[0.04] border border-white/[0.08] items-center justify-center transition-colors hover:bg-white/[0.08]"
+              title="Economic Calendar">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                <rect x="1" y="2.5" width="13" height="12" rx="2" stroke="#6b7280" strokeWidth="1.2"/>
+                <path d="M4.5 1v2M10.5 1v2M1 6.5h13" stroke="#6b7280" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+              {calHasUrgent && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-red-500 border-2 border-[#080a10]" />
+              )}
+            </a>
             <a href="#analyze" className="btn-purple px-5 py-2 text-sm hidden md:inline-flex">
               See Live Demo
             </a>
@@ -650,6 +1418,9 @@ export default function App() {
             </p>
           </div>
 
+          {/* ── Economic calendar strip ── */}
+          <CalendarStrip events={calendarEvents} />
+
           <div className="grid md:grid-cols-2 gap-6">
 
             {/* ── Upload card ── */}
@@ -659,6 +1430,8 @@ export default function App() {
                 <p className="text-[#6b7280] text-sm mt-0.5">Drag & drop or click to select</p>
               </div>
 
+              <TimeframeSelector value={selectedTF} onChange={setSelectedTF} />
+
               <div
                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
@@ -667,7 +1440,7 @@ export default function App() {
                 className={[
                   "rounded-2xl border-2 border-dashed p-8 text-center transition-all duration-200",
                   file ? "cursor-default" : "cursor-pointer",
-                  isDragging ? "border-[#7c3aed] bg-[#7c3aed]/[0.07] scale-[1.01]"
+                  isDragging ? "border-[#00e676] bg-[#00e676]/[0.07] scale-[1.01]"
                              : "border-white/[0.09] hover:border-white/20 hover:bg-white/[0.02]",
                 ].join(" ")}
               >
@@ -676,13 +1449,13 @@ export default function App() {
                   <img src={preview} alt="Chart preview" className="max-h-52 mx-auto rounded-xl object-contain" />
                 ) : (
                   <>
-                    <div className="w-14 h-14 mx-auto rounded-2xl bg-[#7c3aed]/10 border border-[#7c3aed]/20 flex items-center justify-center mb-3">
+                    <div className="w-14 h-14 mx-auto rounded-2xl bg-[#00e676]/10 border border-[#00e676]/20 flex items-center justify-center mb-3">
                       <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-                        <rect x="2" y="4" width="22" height="18" rx="3" stroke="#7c3aed" strokeWidth="1.4" />
-                        <path d="M2 9.5h22" stroke="#7c3aed" strokeWidth="1.4" />
-                        <circle cx="6" cy="7" r="1.1" fill="#7c3aed" />
-                        <circle cx="9.5" cy="7" r="1.1" fill="#7c3aed" />
-                        <path d="M6 18l4-5 3.5 3 4.5-6 3 4" stroke="#7c3aed" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+                        <rect x="2" y="4" width="22" height="18" rx="3" stroke="#00e676" strokeWidth="1.4" />
+                        <path d="M2 9.5h22" stroke="#00e676" strokeWidth="1.4" />
+                        <circle cx="6" cy="7" r="1.1" fill="#00e676" />
+                        <circle cx="9.5" cy="7" r="1.1" fill="#00e676" />
+                        <path d="M6 18l4-5 3.5 3 4.5-6 3 4" stroke="#00e676" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </div>
                     <p className="text-white font-semibold mb-1">Drop your chart image here</p>
@@ -695,10 +1468,10 @@ export default function App() {
 
               {file && (
                 <div className="mt-3 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.07]">
-                  <div className="w-7 h-7 rounded-lg bg-[#7c3aed]/15 flex items-center justify-center flex-shrink-0">
+                  <div className="w-7 h-7 rounded-lg bg-[#00e676]/15 flex items-center justify-center flex-shrink-0">
                     <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                      <rect x="1" y="1" width="11" height="11" rx="2" stroke="#a78bfa" strokeWidth="1.2" />
-                      <path d="M3 5h7M3 7.5h5" stroke="#a78bfa" strokeWidth="1.2" strokeLinecap="round" />
+                      <rect x="1" y="1" width="11" height="11" rx="2" stroke="#00e676" strokeWidth="1.2" />
+                      <path d="M3 5h7M3 7.5h5" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round" />
                     </svg>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -731,7 +1504,7 @@ export default function App() {
                 value={asset}
                 onChange={(e) => setAsset(e.target.value)}
                 placeholder="Asset (e.g. BTC/USD, EUR/USD, AAPL) — optional"
-                className="w-full mt-3 px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#7c3aed]/60 transition-colors"
+                className="w-full mt-3 px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#00e676]/60 transition-colors"
               />
 
               <button onClick={handleAnalyze} disabled={!file || loading}
@@ -776,7 +1549,7 @@ export default function App() {
                 <div>
                   <h3 className="text-lg font-bold text-white">Analysis Results</h3>
                   <p className="text-[#6b7280] text-sm mt-0.5">
-                    {result ? `${result.bias} · ${result.timeframe} · ${result.confidence}% confidence` : "Your AI-powered insights will appear here"}
+                    {result ? `${cur?.bias} · ${result.tfLabels.current} · ${cur?.confidence}% confidence` : "Your AI-powered insights will appear here"}
                   </p>
                 </div>
                 {result && (
@@ -808,161 +1581,286 @@ export default function App() {
               {/* Scanning loader */}
               {loading && <ScanningLoader />}
 
-              {/* ── Animated results reveal ── */}
+              {/* ── Multi-timeframe results ── */}
               {result && (
-                <motion.div
-                  key={revealKey}
-                  className="space-y-3 relative"
-                  initial="hidden"
-                  animate="visible"
-                >
-                  <ScanLine color={biasColor} />
+                <motion.div key={revealKey} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
 
-                  {/* Step 1 — Bias / timeframe badge */}
+                  {/* News warning: high-impact event within 2h for this pair */}
+                  {asset && <NewsWarningBanner events={calendarEvents} asset={asset} />}
+
+                  {/* Confluence badge */}
                   <motion.div
-                    className="rounded-2xl border p-4 flex items-center justify-between gap-4 relative overflow-hidden"
-                    style={{ borderColor: `${biasColor}35`, background: `${biasColor}0d` }}
-                    initial={{ opacity: 0, scale: 0.88 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0, duration: 0.45, type: "spring", bounce: 0.28 }}
+                    className="rounded-xl border p-3 mb-4 flex items-center justify-between"
+                    style={{ borderColor: `${result.confluence.color}30`, background: `${result.confluence.color}0d` }}
+                    initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
                   >
-                    <ParticleBurst color={biasColor} />
-                    <div style={{ position: "relative", zIndex: 1 }}>
-                      <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Bias</p>
-                      <p className="text-2xl font-extrabold" style={{ color: biasColor, textShadow: `0 0 20px ${biasColor}60` }}>{result.bias}</p>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-0.5" style={{ color: result.confluence.color }}>
+                        Timeframe Confluence
+                      </p>
+                      <p className="text-white text-sm font-semibold">{result.confluence.label}</p>
                     </div>
-                    <div className="text-right" style={{ position: "relative", zIndex: 1 }}>
-                      <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Timeframe</p>
-                      <p className="font-dm-mono text-xl font-bold text-white">{result.timeframe}</p>
-                    </div>
+                    <span className="font-dm-mono text-xs font-bold px-2.5 py-1 rounded-full"
+                      style={{ background: `${result.confluence.color}18`, color: result.confluence.color, border: `1px solid ${result.confluence.color}30` }}>
+                      {result.confluence.detail}
+                    </span>
                   </motion.div>
 
-                  {/* Step 2 — Confidence gauge (arc draws from 0 via CSS transition) */}
-                  <motion.div
-                    className="rounded-2xl border border-white/[0.05] bg-white/[0.02] py-6 flex justify-center"
-                    initial={{ opacity: 0, y: 14 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.28, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <ConfidenceGauge score={result.confidence} />
-                  </motion.div>
+                  {/* Tabs */}
+                  <div className="flex gap-1 mb-4 p-1 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                    {(["current", "higher", "highest"] as const).map((tab) => {
+                      const tf    = result.tfLabels[tab];
+                      const bias  = result.analyses[tab]?.bias;
+                      const bc    = bias === "BULLISH" ? "#00e676" : bias === "BEARISH" ? "#f87171" : "#f59e0b";
+                      const label = tab === "current" ? tf : tab === "higher" ? `${tf} ctx` : `${tf} bias`;
+                      const isActive = activeTab === tab;
+                      const isLocked = !isPro && tab !== "current";
+                      return (
+                        <button key={tab} onClick={() => setActiveTab(tab)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold font-dm-mono transition-all duration-150"
+                          style={isActive ? { background: "#00e676", color: "#080a10" }
+                                          : { background: "transparent", color: "#6b7280" }}>
+                          {isLocked && (
+                            <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                              <rect x="1.5" y="4" width="6" height="4.5" rx="1" stroke="currentColor" strokeWidth="1.1"/>
+                              <path d="M3 4V2.8a1.5 1.5 0 013 0V4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+                            </svg>
+                          )}
+                          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: isActive ? "#080a10" : bc }} />
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-                  {/* Step 3 — Trade setup rows slide in from left */}
-                  <motion.div
-                    className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4"
-                    initial={{ opacity: 0, x: -18 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.55, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">
-                      Trade Setup · {result.tradeSetup.entryType}
-                    </p>
-                    {[
-                      { label: "Entry",         value: result.tradeSetup.entry,       color: "white",   i: 0 },
-                      { label: "Stop Loss",     value: result.tradeSetup.stopLoss,    color: "#f87171", i: 1 },
-                      { label: "Take Profit",   value: result.tradeSetup.takeProfit1, color: "#4ade80", i: 2 },
-                      { label: "Risk / Reward", value: result.tradeSetup.riskReward,  color: "#c084fc", i: 3 },
-                    ].map((row) => (
-                      <motion.div
-                        key={row.label}
-                        className="flex justify-between items-center py-2.5 border-b border-white/[0.04] last:border-0"
-                        initial={{ opacity: 0, x: -12 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.65 + row.i * 0.09, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
-                      >
-                        <span className="text-[#6b7280] text-sm">{row.label}</span>
-                        <span className="font-dm-mono text-sm font-semibold" style={{ color: row.color }}>{row.value}</span>
-                      </motion.div>
-                    ))}
-                  </motion.div>
-
-                  {/* Key levels */}
-                  <motion.div
-                    className="grid grid-cols-2 gap-3"
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.82, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <div className="rounded-2xl bg-[#4ade80]/[0.05] border border-[#4ade80]/12 p-3.5">
-                      <p className="text-[#4ade80]/50 text-[10px] font-semibold uppercase tracking-wider mb-2">Resistance</p>
-                      {result.keyLevels.resistance.map((l, i) => (
-                        <p key={i} className="font-dm-mono text-[#4ade80] text-sm leading-relaxed">{l}</p>
-                      ))}
-                    </div>
-                    <div className="rounded-2xl bg-[#f87171]/[0.05] border border-[#f87171]/12 p-3.5">
-                      <p className="text-[#f87171]/50 text-[10px] font-semibold uppercase tracking-wider mb-2">Support</p>
-                      {result.keyLevels.support.map((l, i) => (
-                        <p key={i} className="font-dm-mono text-[#f87171] text-sm leading-relaxed">{l}</p>
-                      ))}
-                    </div>
-                  </motion.div>
-
-                  {/* Indicators */}
-                  <motion.div
-                    className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4"
-                    initial={{ opacity: 0, x: -14 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.96, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Indicators</p>
-                    {[
-                      { label: "RSI",      value: result.indicators.rsi      },
-                      { label: "MACD",     value: result.indicators.macd     },
-                      { label: "MA Cross", value: result.indicators.maCross  },
-                    ].map((row) => (
-                      <div key={row.label} className="flex justify-between items-center py-2.5 border-b border-white/[0.04] last:border-0">
-                        <span className="text-[#6b7280] text-sm">{row.label}</span>
-                        <span className="font-dm-mono text-white text-sm">{row.value}</span>
+                  {/* Current tab — full breakdown */}
+                  {activeTab === "current" && (() => {
+                    const a = result.analyses.current;
+                    return (
+                      <div className="space-y-3 relative">
+                        <ScanLine color={biasColor} />
+                        <motion.div className="rounded-2xl border p-4 flex items-center justify-between gap-4 relative overflow-hidden"
+                          style={{ borderColor: `${biasColor}35`, background: `${biasColor}0d` }}
+                          initial={{ opacity: 0, scale: 0.88 }} animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: 0, duration: 0.45, type: "spring", bounce: 0.28 }}>
+                          <ParticleBurst color={biasColor} />
+                          <div style={{ position: "relative", zIndex: 1 }}>
+                            <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Bias</p>
+                            <p className="text-2xl font-extrabold" style={{ color: biasColor, textShadow: `0 0 20px ${biasColor}60` }}>{a.bias}</p>
+                          </div>
+                          <div className="text-right" style={{ position: "relative", zIndex: 1 }}>
+                            <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Timeframe</p>
+                            <p className="font-dm-mono text-xl font-bold text-white">{a.timeframe}</p>
+                          </div>
+                        </motion.div>
+                        <motion.div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] py-6 flex justify-center"
+                          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.28, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
+                          <ConfidenceGauge score={a.confidence} />
+                        </motion.div>
+                        <motion.div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4"
+                          initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.55, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}>
+                          <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Trade Setup · {a.tradeSetup?.entryType}</p>
+                          {[
+                            { label: "Entry",         value: a.tradeSetup?.entry,       color: "white",   i: 0 },
+                            { label: "Stop Loss",     value: a.tradeSetup?.stopLoss,    color: "#f87171", i: 1 },
+                            { label: "Take Profit",   value: a.tradeSetup?.takeProfit1, color: "#4ade80", i: 2 },
+                            { label: "Risk / Reward", value: a.tradeSetup?.riskReward,  color: "#c084fc", i: 3 },
+                          ].map((row) => (
+                            <motion.div key={row.label}
+                              className="flex justify-between items-center py-2.5 border-b border-white/[0.04] last:border-0"
+                              initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.65 + row.i * 0.09, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
+                              <span className="text-[#6b7280] text-sm">{row.label}</span>
+                              <span className="font-dm-mono text-sm font-semibold" style={{ color: row.color }}>{row.value}</span>
+                            </motion.div>
+                          ))}
+                        </motion.div>
+                        <motion.div className="grid grid-cols-2 gap-3"
+                          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.82, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
+                          <div className="rounded-2xl bg-[#4ade80]/[0.05] border border-[#4ade80]/12 p-3.5">
+                            <p className="text-[#4ade80]/50 text-[10px] font-semibold uppercase tracking-wider mb-2">Resistance</p>
+                            {a.keyLevels?.resistance?.map((l, i) => <p key={i} className="font-dm-mono text-[#4ade80] text-sm leading-relaxed">{l}</p>)}
+                          </div>
+                          <div className="rounded-2xl bg-[#f87171]/[0.05] border border-[#f87171]/12 p-3.5">
+                            <p className="text-[#f87171]/50 text-[10px] font-semibold uppercase tracking-wider mb-2">Support</p>
+                            {a.keyLevels?.support?.map((l, i) => <p key={i} className="font-dm-mono text-[#f87171] text-sm leading-relaxed">{l}</p>)}
+                          </div>
+                        </motion.div>
+                        <motion.div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4"
+                          initial={{ opacity: 0, x: -14 }} animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.96, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
+                          <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Indicators</p>
+                          {[
+                            { label: "RSI",      value: a.indicators?.rsi },
+                            { label: "MACD",     value: a.indicators?.macd },
+                            { label: "MA Cross", value: a.indicators?.maCross },
+                          ].map((row) => (
+                            <div key={row.label} className="flex justify-between items-center py-2.5 border-b border-white/[0.04] last:border-0">
+                              <span className="text-[#6b7280] text-sm">{row.label}</span>
+                              <span className="font-dm-mono text-white text-sm">{row.value}</span>
+                            </div>
+                          ))}
+                        </motion.div>
+                        <motion.div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4"
+                          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 1.1, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
+                          <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">AI Summary</p>
+                          <WordFade text={a.summary} startDelay={1.22} />
+                        </motion.div>
+                        {a.confluences?.length > 0 && (
+                          <motion.div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4"
+                            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 1.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
+                            <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Confluences</p>
+                            <ul className="space-y-2">
+                              {a.confluences.map((c, i) => <li key={i} className="flex items-start gap-2 text-sm text-[#d1d5db]"><Check />{c}</li>)}
+                            </ul>
+                          </motion.div>
+                        )}
+                        {a.warnings?.length > 0 && (
+                          <motion.div className="rounded-2xl bg-[#fbbf24]/[0.05] border border-[#fbbf24]/15 p-4"
+                            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 1.48, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
+                            <p className="text-[#fbbf24] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
+                            {a.warnings.map((w, i) => <p key={i} className="text-[#fcd34d] text-sm mt-1">· {w}</p>)}
+                          </motion.div>
+                        )}
                       </div>
-                    ))}
-                  </motion.div>
+                    );
+                  })()}
 
-                  {/* Step 5 — Summary fades in word by word */}
-                  <motion.div
-                    className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 1.1, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">AI Summary</p>
-                    <WordFade text={result.summary} startDelay={1.22} />
-                  </motion.div>
-
-                  {/* Confluences */}
-                  {result.confluences?.length > 0 && (
-                    <motion.div
-                      className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 1.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
-                    >
-                      <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Confluences</p>
-                      <ul className="space-y-2">
-                        {result.confluences.map((c, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-[#d1d5db]"><Check />{c}</li>
-                        ))}
-                      </ul>
-                    </motion.div>
-                  )}
-
-                  {/* Warnings */}
-                  {result.warnings?.length > 0 && (
-                    <motion.div
-                      className="rounded-2xl bg-[#fbbf24]/[0.05] border border-[#fbbf24]/15 p-4"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 1.48, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
-                    >
-                      <p className="text-[#fbbf24] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
-                      {result.warnings.map((w, i) => (
-                        <p key={i} className="text-[#fcd34d] text-sm mt-1">· {w}</p>
-                      ))}
-                    </motion.div>
-                  )}
+                  {/* Higher / Highest tabs — pro-gated context card */}
+                  {(activeTab === "higher" || activeTab === "highest") && (() => {
+                    const a  = result.analyses[activeTab];
+                    const tf = result.tfLabels[activeTab];
+                    const bc = a.bias === "BULLISH" ? "#00e676" : a.bias === "BEARISH" ? "#f87171" : "#f59e0b";
+                    const title    = activeTab === "higher" ? "Higher Timeframe Context" : "Macro Bias";
+                    const subtitle = activeTab === "higher" ? "Trend direction & key zones" : "Overall market direction";
+                    return (
+                      <div className="relative">
+                        {!isPro && (
+                          <div className="absolute inset-0 z-10 rounded-2xl flex flex-col items-center justify-center text-center px-6"
+                            style={{ backdropFilter: "blur(8px)", background: "rgba(8,10,16,0.65)" }}>
+                            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" className="mb-3">
+                              <rect x="4" y="14" width="24" height="16" rx="4" stroke="#00e676" strokeWidth="1.5"/>
+                              <path d="M10 14V10a6 6 0 0112 0v4" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round"/>
+                            </svg>
+                            <p className="text-white font-bold mb-1">Pro Feature</p>
+                            <p className="text-[#6b7280] text-sm mb-4">Multi-timeframe context requires a Pro plan.</p>
+                            <button
+                              onClick={() => { if (clientId) fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) }).then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; }); }}
+                              className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
+                              style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 20px rgba(0,230,118,0.3)" }}>
+                              Upgrade to Pro — £19/mo
+                            </button>
+                          </div>
+                        )}
+                        <div className={!isPro ? "pointer-events-none select-none" : ""}>
+                          <div className="rounded-2xl border p-4 flex items-center justify-between gap-4 mb-3"
+                            style={{ borderColor: `${bc}35`, background: `${bc}0d` }}>
+                            <div>
+                              <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">{title}</p>
+                              <p className="text-xs text-[#6b7280]">{subtitle}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-dm-mono text-xs text-[#6b7280] mb-1">{tf}</p>
+                              <p className="text-2xl font-extrabold" style={{ color: bc, textShadow: `0 0 20px ${bc}60` }}>{a.bias}</p>
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] py-6 flex justify-center mb-3">
+                            <ConfidenceGauge score={a.confidence} />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 mb-3">
+                            <div className="rounded-2xl bg-[#4ade80]/[0.05] border border-[#4ade80]/12 p-3.5">
+                              <p className="text-[#4ade80]/50 text-[10px] font-semibold uppercase tracking-wider mb-2">Resistance</p>
+                              {a.keyLevels?.resistance?.map((l, i) => <p key={i} className="font-dm-mono text-[#4ade80] text-sm leading-relaxed">{l}</p>)}
+                            </div>
+                            <div className="rounded-2xl bg-[#f87171]/[0.05] border border-[#f87171]/12 p-3.5">
+                              <p className="text-[#f87171]/50 text-[10px] font-semibold uppercase tracking-wider mb-2">Support</p>
+                              {a.keyLevels?.support?.map((l, i) => <p key={i} className="font-dm-mono text-[#f87171] text-sm leading-relaxed">{l}</p>)}
+                            </div>
+                          </div>
+                          <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4 mb-3">
+                            <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">
+                              {activeTab === "higher" ? "Context Summary" : "Macro Summary"}
+                            </p>
+                            <p className="text-[#d1d5db] text-sm leading-relaxed">{a.summary}</p>
+                          </div>
+                          {a.confluences?.length > 0 && (
+                            <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4 mb-3">
+                              <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Key Factors</p>
+                              <ul className="space-y-2">
+                                {a.confluences.map((c, i) => <li key={i} className="flex items-start gap-2 text-sm text-[#d1d5db]"><Check />{c}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {a.warnings?.length > 0 && (
+                            <div className="rounded-2xl bg-[#fbbf24]/[0.05] border border-[#fbbf24]/15 p-4">
+                              <p className="text-[#fbbf24] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
+                              {a.warnings.map((w, i) => <p key={i} className="text-[#fcd34d] text-sm mt-1">· {w}</p>)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </motion.div>
               )}
             </div>
           </div>
+
+          {/* ── Position calculator toggle ── */}
+          {result && (
+            <>
+              <div className="mt-4 flex justify-center">
+                <button
+                  onClick={() => setShowCalculator((s) => !s)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-dm-mono text-xs font-semibold border transition-all duration-200 hover:-translate-y-0.5"
+                  style={{
+                    background: showCalculator ? "rgba(0,230,118,0.1)" : "rgba(255,255,255,0.03)",
+                    borderColor: showCalculator ? "rgba(0,230,118,0.3)" : "rgba(255,255,255,0.08)",
+                    color: showCalculator ? "#00e676" : "#6b7280",
+                  }}>
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <rect x="0.7" y="0.7" width="11.6" height="11.6" rx="2" stroke="currentColor" strokeWidth="1.2"/>
+                    <path d="M3 4h7M3 6.5h7M3 9h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+                  </svg>
+                  {showCalculator ? "Hide Calculator" : "Calculate Position Size"}
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
+                    style={{ transform: showCalculator ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                    <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+              {showCalculator && result.analyses.current.tradeSetup && (
+                <PositionCalculator
+                  key={revealKey}
+                  defaultEntry={result.analyses.current.tradeSetup.entry ?? ""}
+                  defaultSL={result.analyses.current.tradeSetup.stopLoss ?? ""}
+                  defaultTP1={result.analyses.current.tradeSetup.takeProfit1 ?? ""}
+                  asset={asset}
+                  isPro={isPro}
+                  clientId={clientId}
+                />
+              )}
+            </>
+          )}
+
+          {/* ── Chat box (full width, below grid) ── */}
+          {result && (
+            <ChatBox
+              key={revealKey}
+              journalId={journalId}
+              analysisJson={result.analyses.current}
+              chartBase64={chartBase64}
+              chartMime={chartMime}
+              clientId={clientId}
+              isPro={isPro}
+            />
+          )}
         </div>
       </section>
 
@@ -1023,7 +1921,7 @@ export default function App() {
                 style={{ borderColor: step.highlight ? "rgba(245,197,24,0.6)" : "rgba(255,255,255,0.07)", background: step.highlight ? "rgba(245,197,24,0.03)" : "#0c0f18", boxShadow: step.highlight ? "0 0 30px rgba(245,197,24,0.08)" : "none" }}
                 data-animate data-delay={step.delay}>
                 <div className="absolute -top-4 -left-4 w-8 h-8 rounded-xl flex items-center justify-center text-sm font-extrabold shadow-lg"
-                  style={{ background: step.highlight ? "#f5c518" : "#7c3aed", color: step.highlight ? "#080a10" : "white", boxShadow: step.highlight ? "0 0 16px rgba(245,197,24,0.5)" : "0 0 14px rgba(124,58,237,0.45)" }}>
+                  style={{ background: step.highlight ? "#f5c518" : "#00e676", color: "#080a10", boxShadow: step.highlight ? "0 0 16px rgba(245,197,24,0.5)" : "0 0 14px rgba(0,230,118,0.45)" }}>
                   {step.n}
                 </div>
                 <div className="w-14 h-14 rounded-2xl bg-white/[0.04] flex items-center justify-center text-3xl mb-4">{step.emoji}</div>
@@ -1117,7 +2015,7 @@ export default function App() {
             <a href="#analyze" className="btn-yellow px-8 py-3.5 text-sm flex items-center gap-2">⚡ Analyze My Chart</a>
             <button className="btn-outline px-8 py-3.5 text-sm">▶ Watch Demo</button>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-6 text-[#a78bfa] text-sm">
+          <div className="flex flex-wrap items-center justify-center gap-6 text-[#00e676] text-sm">
             {["🔒 Secure payments", "🛡 30-day guarantee", "⚡ Instant access", "💬 24/7 support"].map((t) => (
               <span key={t}>{t}</span>
             ))}

@@ -17,6 +17,7 @@ export type JournalEntry = {
   confidence: number | null;
   outcome: Outcome | null;
   notes: string | null;
+  user_id: string | null;
 };
 
 export type JournalInsert = Omit<JournalEntry, "id" | "created_at" | "outcome" | "notes">;
