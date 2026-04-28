@@ -27,22 +27,63 @@ export async function POST(req: Request) {
 
   try {
     switch (event.type) {
-      case "checkout.session.completed": {
-        const session    = event.data.object as Stripe.Checkout.Session;
-        const clientId   = session.client_reference_id;
-        const email      = session.customer_email ?? session.metadata?.email ?? null;
-        const customerId = typeof session.customer === "string" ? session.customer : null;
 
-        console.log("[stripe/webhook] Updating user plan to pro for:", clientId);
+      // Primary upgrade trigger — fires reliably on first payment
+      case "invoice.paid":
+      case "invoice.payment_succeeded": {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const invoice        = event.data.object as any;
+        const email          = (invoice.customer_email as string | null) ?? null;
+        const customerId     = typeof invoice.customer === "string" ? (invoice.customer as string) : null;
+        const subscriptionId = typeof invoice.subscription === "string" ? (invoice.subscription as string) : null;
+
+        console.log("[stripe/webhook] invoice.paid — customer:", customerId, "email:", email);
+
+        // Retrieve subscription metadata to get the browser client_id
+        let clientId: string | null = null;
+        if (subscriptionId) {
+          try {
+            const sub = await stripe.subscriptions.retrieve(subscriptionId);
+            clientId  = sub.metadata?.client_id ?? null;
+          } catch (e) {
+            console.error("[stripe/webhook] failed to retrieve subscription:", e);
+          }
+        }
+
+        console.log("[stripe/webhook] Updating user plan to pro for client_id:", clientId, "email:", email);
 
         if (clientId) {
           const { data, error } = await supabase.from("profiles").upsert(
             { client_id: clientId, email, plan: "pro", stripe_customer_id: customerId },
             { onConflict: "client_id" }
           ).select("id, client_id, plan");
-          console.log("[stripe/webhook] Supabase update result:", data, error);
+          console.log("Plan upgraded to pro for:", email, "result:", data, error);
+        } else if (email) {
+          // Fallback: match by email (no client_id in metadata — old subscription)
+          const { data, error } = await supabase.from("profiles")
+            .update({ plan: "pro", stripe_customer_id: customerId ?? undefined })
+            .eq("email", email)
+            .select("id, client_id, plan");
+          console.log("Plan upgraded to pro for:", email, "result:", data, error);
         } else {
-          console.warn("[stripe/webhook] No client_reference_id on session:", session.id);
+          console.warn("[stripe/webhook] Cannot identify user — no client_id or email on invoice");
+        }
+        break;
+      }
+
+      // Belt-and-suspenders: also handle checkout.session.completed if it fires
+      case "checkout.session.completed": {
+        const session    = event.data.object as Stripe.Checkout.Session;
+        const clientId   = session.client_reference_id;
+        const email      = session.customer_email ?? session.metadata?.email ?? null;
+        const customerId = typeof session.customer === "string" ? session.customer : null;
+        console.log("[stripe/webhook] checkout.session.completed — client_id:", clientId);
+        if (clientId) {
+          const { data, error } = await supabase.from("profiles").upsert(
+            { client_id: clientId, email, plan: "pro", stripe_customer_id: customerId },
+            { onConflict: "client_id" }
+          ).select("id, client_id, plan");
+          console.log("Plan upgraded to pro for:", email, "result:", data, error);
         }
         break;
       }
@@ -52,7 +93,10 @@ export async function POST(req: Request) {
         const customerId = typeof sub.customer === "string" ? sub.customer : null;
         console.log("[stripe/webhook] Subscription deleted for customer:", customerId);
         if (customerId) {
-          const { data, error } = await supabase.from("profiles").update({ plan: "free" }).eq("stripe_customer_id", customerId).select("id, plan");
+          const { data, error } = await supabase.from("profiles")
+            .update({ plan: "free" })
+            .eq("stripe_customer_id", customerId)
+            .select("id, plan");
           console.log("[stripe/webhook] Supabase downgrade result:", data, error);
         }
         break;

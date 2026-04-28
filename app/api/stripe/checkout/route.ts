@@ -15,6 +15,10 @@ export async function POST(req: Request) {
       customer_email: email || undefined,
       client_reference_id: clientId || undefined,
       metadata: { user_id: clientId || "" },
+      // Store client_id on the subscription so invoice.paid can read it
+      subscription_data: {
+        metadata: { client_id: clientId || "" },
+      },
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?upgraded=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/?cancelled=true`,
     });
