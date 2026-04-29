@@ -46,54 +46,79 @@ const BROWSER = {
   Accept: "*/*",
 };
 
-// ── Yahoo Finance with crumb auth ─────────────────────────────
-async function fetchViaYahoo(): Promise<Record<string, { price: number; change: number }> | null> {
-  // 1. Get a session cookie from the homepage
+// Module-level crumb cache — reuse across requests in the same serverless instance
+// This is the key fix: fetching a fresh crumb on every request triggers Yahoo's 429
+let crumbCache: { crumb: string; cookieStr: string; ts: number } | null = null;
+const CRUMB_TTL = 12 * 60 * 1000; // 12 minutes
+
+async function getYahooCrumb(): Promise<{ crumb: string; cookieStr: string }> {
+  if (crumbCache && Date.now() - crumbCache.ts < CRUMB_TTL) {
+    return crumbCache;
+  }
+
   const pageRes = await fetch("https://finance.yahoo.com/", {
     headers: { ...BROWSER, Accept: "text/html,application/xhtml+xml" },
     redirect: "follow",
-    cache: "no-store",
+    cache:    "no-store",
   });
 
-  // Collect Set-Cookie headers (Node 18+ supports getSetCookie())
-  type HeadersWithGetSetCookie = Headers & { getSetCookie?: () => string[] };
-  const h = pageRes.headers as HeadersWithGetSetCookie;
-  const rawCookies: string[] =
-    typeof h.getSetCookie === "function"
-      ? h.getSetCookie()
-      : [h.get("set-cookie") ?? ""].filter(Boolean);
+  type H = Headers & { getSetCookie?: () => string[] };
+  const h = pageRes.headers as H;
+  const rawCookies = typeof h.getSetCookie === "function"
+    ? h.getSetCookie()
+    : [h.get("set-cookie") ?? ""].filter(Boolean);
 
   const cookieStr = rawCookies.map((c) => c.split(";")[0]).join("; ");
   if (!cookieStr) throw new Error("no cookies from Yahoo homepage");
 
-  // 2. Fetch the crumb (tied to the session cookie)
-  const crumbRes = await fetch(
-    "https://query1.finance.yahoo.com/v1/test/getcrumb",
-    { headers: { ...BROWSER, Cookie: cookieStr }, cache: "no-store" }
-  );
+  const crumbRes = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+    headers: { ...BROWSER, Cookie: cookieStr },
+    cache:   "no-store",
+  });
   if (!crumbRes.ok) throw new Error(`crumb HTTP ${crumbRes.status}`);
 
   const crumb = (await crumbRes.text()).trim();
-  if (!crumb || crumb.length > 30 || crumb.startsWith("<"))
-    throw new Error("bad crumb");
+  if (!crumb || crumb.length > 30 || crumb.startsWith("<")) throw new Error("bad crumb");
 
-  // 3. Batch quote request
-  const qs = SYMBOLS.map((s) => encodeURIComponent(s.yf)).join(",");
+  crumbCache = { crumb, cookieStr, ts: Date.now() };
+  return crumbCache;
+}
+
+// ── Yahoo Finance with crumb auth ─────────────────────────────
+async function fetchViaYahoo(): Promise<Record<string, { price: number; change: number }> | null> {
+  const { crumb, cookieStr } = await getYahooCrumb();
+
+  const qs  = SYMBOLS.map((s) => encodeURIComponent(s.yf)).join(",");
   const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${qs}&crumb=${encodeURIComponent(crumb)}`;
 
   const quotesRes = await fetch(url, {
     headers: { ...BROWSER, Cookie: cookieStr },
-    cache: "no-store",
+    cache:   "no-store",
   });
+
+  // If quotes fail with 401/403 the crumb expired — bust cache and retry once
+  if (quotesRes.status === 401 || quotesRes.status === 403) {
+    crumbCache = null;
+    const retry = await getYahooCrumb();
+    const r2 = await fetch(
+      `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${qs}&crumb=${encodeURIComponent(retry.crumb)}`,
+      { headers: { ...BROWSER, Cookie: retry.cookieStr }, cache: "no-store" }
+    );
+    if (!r2.ok) throw new Error(`quotes HTTP ${r2.status} (retry)`);
+    const json2 = await r2.json();
+    const out2: Record<string, { price: number; change: number }> = {};
+    for (const q of json2?.quoteResponse?.result ?? []) {
+      out2[q.symbol] = { price: q.regularMarketPrice, change: q.regularMarketChangePercent };
+    }
+    return out2;
+  }
+
   if (!quotesRes.ok) throw new Error(`quotes HTTP ${quotesRes.status}`);
 
   const json = await quotesRes.json();
   const out: Record<string, { price: number; change: number }> = {};
   for (const q of json?.quoteResponse?.result ?? []) {
-    out[q.symbol] = {
-      price:  q.regularMarketPrice,
-      change: q.regularMarketChangePercent,
-    };
+    out[q.symbol] = { price: q.regularMarketPrice, change: q.regularMarketChangePercent };
   }
   return out;
 }
@@ -126,33 +151,29 @@ async function fetchViaBinance(): Promise<Record<string, { price: number; change
 
 // ── Main handler ──────────────────────────────────────────────
 export async function GET() {
-  // Try Yahoo Finance first (gives us all 12 symbols)
-  let live = false;
   let bySymbol: Record<string, { price: number; change: number }> = {};
+  let yahooOk = false;
 
+  // 1. Try Yahoo Finance (forex, stocks, gold, indices)
   try {
     const yf = await fetchViaYahoo();
     if (yf && Object.keys(yf).length > 0) {
-      bySymbol = yf;
-      live = true;
+      bySymbol = { ...yf };
+      yahooOk  = true;
     }
   } catch (err) {
     console.error("[ticker] Yahoo Finance failed:", err);
   }
 
-  // Overlay Binance for crypto (better data, always available)
-  if (!live) {
-    try {
-      const bin = await fetchViaBinance();
-      if (Object.keys(bin).length > 0) {
-        bySymbol = { ...bySymbol, ...bin };
-        live = Object.keys(bySymbol).length > 0;
-      }
-    } catch (err) {
-      console.error("[ticker] Binance failed:", err);
-    }
+  // 2. Always overlay Binance for crypto — it's faster and never 429s
+  try {
+    const bin = await fetchViaBinance();
+    bySymbol = { ...bySymbol, ...bin };
+  } catch (err) {
+    console.error("[ticker] Binance failed:", err);
   }
 
+  const live  = Object.keys(bySymbol).length > 0;
   const items = SYMBOLS.map((s, i) => {
     const q = bySymbol[s.yf];
     if (!q) return FALLBACK[i];
@@ -163,5 +184,6 @@ export async function GET() {
     };
   });
 
+  console.log(`[ticker] live:${live} yahooOk:${yahooOk} symbols:${Object.keys(bySymbol).length}`);
   return Response.json({ items, live });
 }
