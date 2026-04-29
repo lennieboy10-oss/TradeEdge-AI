@@ -1485,7 +1485,8 @@ export default function App() {
   const [usedToday, setUsedToday]           = useState(0);
   const [clientId, setClientId]             = useState<string | null>(null);
   const [plan, setPlan]                     = useState("free");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef       = useRef<HTMLInputElement>(null);
+  const resultsRef    = useRef<HTMLDivElement>(null);
   const [chartBase64, setChartBase64]   = useState<string | null>(null);
   const [chartMime, setChartMime]       = useState("image/png");
   const [journalId, setJournalId]       = useState<string | null>(null);
@@ -1654,6 +1655,7 @@ export default function App() {
         setResult({ analyses: data.analyses, tfLabels: data.tfLabels, confluence: data.confluence });
         setJournalId(data.journalId ?? null);
         setRevealKey(k => k + 1);
+        setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
         if (!data.usage?.isPro) {
           const newUsed = data.usage?.used ?? usedToday + 1;
           const today   = new Date().toISOString().slice(0, 10);
@@ -2056,9 +2058,8 @@ export default function App() {
             </div>
 
             {/* ── Results card ── */}
-            <div className={`card-dark p-7 relative overflow-hidden transition-all duration-500 ${isPro && result ? "ring-1 ring-[#00e676]/30" : ""}`}
-              style={isPro && result ? { boxShadow: "0 0 40px rgba(0,230,118,0.08), 0 0 80px rgba(0,230,118,0.04)" } : {}}
-              data-animate data-delay="2">
+            <div ref={resultsRef} className={`card-dark p-7 relative overflow-hidden transition-all duration-500 ${isPro && result ? "ring-1 ring-[#00e676]/30" : ""}`}
+              style={isPro && result ? { boxShadow: "0 0 40px rgba(0,230,118,0.08), 0 0 80px rgba(0,230,118,0.04)" } : {}}>
               {isPro && result && <ProParticles color={biasColor} />}
               <div className="flex items-center justify-between mb-5">
                 <div>
