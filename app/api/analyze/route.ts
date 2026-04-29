@@ -3,18 +3,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getSupabase } from "@/app/lib/supabase";
 import { checkAndSendAlerts } from "@/app/lib/alerts";
 
-export const maxDuration = 120; // Vercel Pro — three parallel vision calls need headroom
+export const maxDuration = 60;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-const BIAS_TO_SIGNAL: Record<string, string> = {
-  BULLISH: "LONG",
-  BEARISH: "SHORT",
-  NEUTRAL: "NEUTRAL",
-};
-
 const DAILY_LIMIT = 3;
-const CALL_TIMEOUT_MS = 45_000; // per-call hard limit — prevents one slow call killing everything
+const CALL_TIMEOUT_MS = 25_000;
 
 const usageMap = new Map<string, { count: number; date: string }>();
 
@@ -28,117 +22,144 @@ function getHigherTFs(tf: string): [string, string] {
   ];
 }
 
-// ── Fallback neutral analysis returned when a call times out / fails ──
-function neutralFallback(tf: string): object {
+// ── Simple prompt (user-specified) ────────────────────────────
+const SIMPLE_PROMPT = `You are a trading analyst. Analyse this chart image and return ONLY a valid JSON object with exactly these fields:
+{
+  "signal": "LONG or SHORT or NEUTRAL",
+  "entry": "price level as string",
+  "stopLoss": "price level as string",
+  "takeProfit": "price level as string",
+  "riskReward": "ratio as string e.g. 1:2",
+  "confidence": 75,
+  "grade": "A+ or A or B or C or D",
+  "trend": "Bullish or Bearish or Ranging",
+  "keyLevels": "string describing support and resistance",
+  "structure": "string describing market structure",
+  "confluenceFactors": ["factor 1", "factor 2", "factor 3"],
+  "warnings": ["warning if any"],
+  "summary": "3-4 sentence trade summary"
+}
+Return ONLY the JSON. No markdown. No backticks. No explanation. Just the raw JSON object.`;
+
+const CONTEXT_PROMPT = (tf: string) =>
+  `You are a trading analyst. Analyse this ${tf} chart and return ONLY a valid JSON object:
+{"signal":"LONG or SHORT or NEUTRAL","confidence":65,"trend":"Bullish or Bearish or Ranging","keyLevels":"support and resistance levels","summary":"2 sentence trend summary","confluenceFactors":["factor 1"],"warnings":[]}
+Return ONLY the JSON. No markdown. No backticks.`;
+
+// ── Map simple response → frontend AnalysisResult shape ──────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapToAnalysis(raw: any, tf: string, isContext = false): Record<string, unknown> {
+  const SIGNAL_TO_BIAS: Record<string, string> = {
+    LONG: "BULLISH", SHORT: "BEARISH", NEUTRAL: "NEUTRAL",
+    BULLISH: "BULLISH", BEARISH: "BEARISH",
+  };
+
+  const bias       = SIGNAL_TO_BIAS[(raw.signal ?? raw.bias ?? "NEUTRAL").toUpperCase()] ?? "NEUTRAL";
+  const confidence = typeof raw.confidence === "number" ? raw.confidence : 50;
+  const confluences = Array.isArray(raw.confluenceFactors)
+    ? raw.confluenceFactors
+    : Array.isArray(raw.confluences) ? raw.confluences : [];
+  const warnings = Array.isArray(raw.warnings) ? raw.warnings : [];
+
+  if (isContext) {
+    return {
+      bias, confidence, timeframe: tf,
+      summary: raw.summary ?? "",
+      tradeSetup: { entry: "N/A", entryType: "Limit", stopLoss: "N/A", takeProfit1: "N/A", riskReward: "N/A" },
+      keyLevels:  { resistance: raw.keyLevels ? [raw.keyLevels] : [], support: [] },
+      indicators: { rsi: "Neutral", macd: raw.trend ?? "N/A", maCross: "No Cross" },
+      confluences, confluenceChecks: [], warnings,
+    };
+  }
+
   return {
-    bias: "NEUTRAL",
-    confidence: 0,
-    timeframe: tf,
-    summary: "Analysis unavailable | Could not complete analysis for this timeframe | N/A | Wait for a fresh chart upload | API timeout — please retry",
-    tradeSetup: { entry: "N/A", entryType: "Limit", stopLoss: "N/A", takeProfit1: "N/A", riskReward: "N/A" },
-    keyLevels:  { resistance: [], support: [] },
-    indicators: { rsi: "Neutral", macd: "Unavailable", maCross: "No Cross" },
-    confluences: [],
-    confluenceChecks: [],
-    warnings: ["Analysis timed out — please retry with the same chart"],
+    bias, confidence, timeframe: tf,
+    summary:      raw.summary      ?? "",
+    tradeScore:   raw.grade,
+    marketStructure: raw.structure ?? "",
+    tradeSetup: {
+      entry:       raw.entry      ?? "N/A",
+      entryType:   "Limit",
+      stopLoss:    raw.stopLoss   ?? "N/A",
+      takeProfit1: raw.takeProfit ?? "N/A",
+      riskReward:  raw.riskReward ?? "N/A",
+    },
+    keyLevels: {
+      resistance: raw.keyLevels ? [raw.keyLevels] : [],
+      support:    [],
+    },
+    indicators: {
+      rsi:     "Neutral",
+      macd:    raw.trend   ?? "N/A",
+      maCross: "No Cross",
+    },
+    confluences, confluenceChecks: [], warnings,
   };
 }
 
-// ── Prompts ────────────────────────────────────────────────────
-function buildSystemPrompt(tf: string, role: "current" | "higher" | "highest", isPro = false): string {
-
-  // Context timeframes — short focused prompt
-  if (role !== "current") {
-    const focus = role === "higher"
-      ? `prevailing trend, swing highs/lows, and major S/R zones at the ${tf} level`
-      : `macro trend direction and highest-timeframe key levels at the ${tf} level`;
-    return `You are a professional trader. Analyse this ${tf} chart for ${focus}.
-
-Return ONLY this JSON (no markdown, no extra text):
-{"success":true,"analysis":{"bias":"BULLISH","confidence":65,"timeframe":"${tf}","summary":"2-3 sentence trend summary.","tradeSetup":{"entry":"N/A","entryType":"Limit","stopLoss":"N/A","takeProfit1":"N/A","riskReward":"N/A"},"keyLevels":{"resistance":["level 1","level 2"],"support":["level 1","level 2"]},"indicators":{"rsi":"Neutral","macd":"description","maCross":"No Cross"},"confluences":["factor 1","factor 2"],"confluenceChecks":[],"warnings":[]}}
-
-CRITICAL: You MUST return valid JSON every single time. Never return plain text. If you cannot analyse the chart return JSON with bias "NEUTRAL" and explain in summary.`;
-  }
-
-  // Current timeframe — full analysis
-  const proFields = isPro ? `"tradeScore":"A","fibonacci":{"keyLevels":["0.382 at price","0.5 at price","0.618 at price"],"context":"key fib context"},"volumeAnalysis":"volume sentence","marketStructure":"HH/HL or LH/LL sentence","momentum":"momentum sentence","priceLevels":["level 1","level 2","level 3"],"invalidationLevel":"price — reason","bestSession":"London",` : "";
-
-  return `You are a professional institutional trader (20 yrs experience) specialising in price action and smart money concepts.
-
-Analyse this ${tf} chart. Follow this methodology:
-
-1. MARKET STRUCTURE: Identify trend (uptrend HH/HL, downtrend LH/LL, range). Note last BOS or CHOCH.
-2. KEY LEVELS: Strongest S/R with multiple rejections. Note FVGs, round numbers.
-3. ENTRY: Only if 2+ confluence factors align. If unclear set bias NEUTRAL.
-4. RISK: SL beyond structure. TP at next significant level. Min R:R 1:1.5 — if below, set NEUTRAL.
-5. CONFIDENCE: 5+ factors=85-100, 4=70-84, 3=55-69, 2=40-54, 1=0-39 set NEUTRAL.
-6. WARNINGS: Add any of: "Chart is choppy", "Price at major resistance", "Low volume", "Against higher TF trend".
-
-${isPro ? `7. TRADE GRADE: A+=5+confluences R:R≥1:3, A=4+ R:R≥1:2, B=3 R:R≥1.5, C=2 caution, D=avoid.` : ""}
-
-Return ONLY this JSON structure (replace placeholder values, no markdown, no extra text):
-{"success":true,"analysis":{"bias":"BULLISH","confidence":72,"timeframe":"${tf}","summary":"What chart doing now | Why good or bad entry | Exact invalidation price | What confirmation to wait for | Key risk","${isPro ? `tradeScore":"A","` : ""}tradeSetup":{"entry":"exact price","entryType":"Limit","stopLoss":"exact price","takeProfit1":"exact price","riskReward":"1:2.1"},"keyLevels":{"resistance":["price — reason","price — reason"],"support":["price — reason","price — reason"]},"indicators":{"rsi":"Neutral","macd":"description","maCross":"No Cross"},"confluences":["factor 1","factor 2"],"confluenceChecks":[{"label":"Trend aligned","passed":true},{"label":"Key level respected","passed":true},{"label":"Volume confirming","passed":false},{"label":"Higher timeframe aligned","passed":true},{"label":"Pattern confirmed","passed":false},{"label":"R:R above 1:2","passed":true}],"warnings":["warning if any"]${isPro ? `,"fibonacci":{"keyLevels":["0.382 at price","0.5 at price","0.618 at price"],"context":"key level"},"volumeAnalysis":"sentence","marketStructure":"HH/HL sentence","momentum":"sentence","priceLevels":["level 1","level 2","level 3"],"invalidationLevel":"price — reason","bestSession":"London","historicalSetups":[{"pattern":"name","asset":"asset","period":"Month Year","result":"outcome"}]` : ""}}}
-
-CRITICAL: You MUST always return valid JSON. Never return plain text. Never return empty response. If chart is unreadable return bias NEUTRAL and explain in summary.`;
+// ── Neutral fallback ───────────────────────────────────────────
+function neutralFallback(tf: string): Record<string, unknown> {
+  return {
+    bias: "NEUTRAL", confidence: 0, timeframe: tf,
+    summary: "Analysis unavailable — please retry.",
+    tradeSetup: { entry: "N/A", entryType: "Limit", stopLoss: "N/A", takeProfit1: "N/A", riskReward: "N/A" },
+    keyLevels:  { resistance: [], support: [] },
+    indicators: { rsi: "Neutral", macd: "N/A", maCross: "No Cross" },
+    confluences: [], confluenceChecks: [],
+    warnings: ["Analysis timed out — please retry"],
+  };
 }
 
-// ── Safe JSON parse with logging ───────────────────────────────
-function parseAnalysis(raw: string, tf: string): object {
+// ── Claude call with per-call timeout ─────────────────────────
+async function callClaude(
+  systemPrompt: string,
+  tf: string,
+  mime: "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+  base64: string,
+  maxTokens: number,
+): Promise<string> {
+  const apiCall = anthropic.messages.create({
+    model:      "claude-opus-4-7",
+    max_tokens: maxTokens,
+    system:     systemPrompt,
+    messages:   [{
+      role:    "user",
+      content: [
+        { type: "text",  text: `Chart timeframe: ${tf}` },
+        { type: "image", source: { type: "base64", media_type: mime, data: base64 } },
+      ],
+    }],
+  });
+
+  const timer = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`Call timeout after ${CALL_TIMEOUT_MS}ms`)), CALL_TIMEOUT_MS)
+  );
+
+  const result = await Promise.race([apiCall, timer]);
+  return result.content[0].type === "text" ? result.content[0].text : "{}";
+}
+
+// ── Parse raw text → analysis object ──────────────────────────
+function parseRaw(raw: string, tf: string, isContext = false): Record<string, unknown> {
+  // Strip markdown fences if present
   const clean = raw
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/,      "")
     .replace(/\s*```$/,      "")
     .trim();
 
-  console.log(`[analyze] raw response for ${tf} (first 300 chars):`, clean.slice(0, 300));
+  console.log(`[analyze] raw[${tf}] (first 400 chars):`, clean.slice(0, 400));
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed = JSON.parse(clean) as any;
-    const analysis = parsed.analysis ?? parsed;
-
-    // Ensure arrays always exist so frontend never crashes
-    analysis.confluences     = Array.isArray(analysis.confluences)     ? analysis.confluences     : [];
-    analysis.confluenceChecks = Array.isArray(analysis.confluenceChecks) ? analysis.confluenceChecks : [];
-    analysis.warnings        = Array.isArray(analysis.warnings)        ? analysis.warnings        : [];
-    if (!analysis.keyLevels?.resistance) analysis.keyLevels = { resistance: [], support: [] };
-
-    return analysis;
+    const parsed = JSON.parse(clean);
+    // Handle {success:true, analysis:{...}} wrapper if present
+    const data = parsed.analysis ?? parsed;
+    return mapToAnalysis(data, tf, isContext);
   } catch (e) {
-    console.error(`[analyze] JSON parse failed for ${tf}. Raw text:`, clean);
+    console.error(`[analyze] JSON parse FAILED for ${tf}. Full raw:`, clean);
     console.error(`[analyze] parse error:`, e);
     return neutralFallback(tf);
   }
-}
-
-// ── Per-call timeout wrapper ───────────────────────────────────
-async function makeCallWithTimeout(
-  anthropic: Anthropic,
-  tf: string,
-  role: "current" | "higher" | "highest",
-  isPro: boolean,
-  mime: "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-  base64: string,
-): Promise<string> {
-  const apiCall = anthropic.messages.create({
-    model:      "claude-opus-4-7",
-    max_tokens: isPro && role === "current" ? 2800 : role === "current" ? 1800 : 1000,
-    system:     buildSystemPrompt(tf, role, isPro && role === "current"),
-    messages:   [{
-      role:    "user",
-      content: [
-        { type: "text",  text: `Analyse this chart. Timeframe: ${tf}.` },
-        { type: "image", source: { type: "base64", media_type: mime, data: base64 } },
-      ],
-    }],
-  });
-
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`Timeout after ${CALL_TIMEOUT_MS}ms`)), CALL_TIMEOUT_MS)
-  );
-
-  const result = await Promise.race([apiCall, timeout]);
-  return result.content[0].type === "text" ? result.content[0].text : "{}";
 }
 
 function getClientIP(req: Request): string {
@@ -163,10 +184,7 @@ export async function POST(req: Request) {
   if (clientId) {
     try {
       const { data } = await getSupabase()
-        .from("profiles")
-        .select("plan")
-        .eq("client_id", clientId)
-        .single();
+        .from("profiles").select("plan").eq("client_id", clientId).single();
       isPro = data?.plan === "pro";
     } catch { /* non-fatal */ }
   }
@@ -174,12 +192,11 @@ export async function POST(req: Request) {
   // ── Rate limit ─────────────────────────────────────────────────
   const ip    = getClientIP(req);
   const today = new Date().toISOString().slice(0, 10);
-
   if (!isPro) {
     const entry = usageMap.get(ip);
     if (!entry || entry.date !== today) usageMap.set(ip, { count: 0, date: today });
     const count = usageMap.get(ip)!.count;
-    console.log("COUNT:", ip, count);
+    console.log(`[analyze] rate check — ip:${ip} count:${count}`);
     if (count >= DAILY_LIMIT) {
       return NextResponse.json(
         { success: false, error: "Daily limit reached", used: count, limit: DAILY_LIMIT },
@@ -195,24 +212,23 @@ export async function POST(req: Request) {
     const mime   = file.type as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
     const [higherTF, highestTF] = getHigherTFs(timeframe);
+    console.log(`[analyze] START — tf:${timeframe} higher:${higherTF} highest:${highestTF} isPro:${isPro} imageSize:${bytes.byteLength}`);
 
-    console.log(`[analyze] starting 3 parallel calls — current:${timeframe} higher:${higherTF} highest:${highestTF} isPro:${isPro}`);
-
-    // Run all three calls in parallel; each has its own 45 s timeout so one slow call can't block the others
+    // Three parallel calls — simple prompts = fast responses
     const [raw1, raw2, raw3] = await Promise.all([
-      makeCallWithTimeout(anthropic, timeframe,  "current",  isPro, mime, base64).catch((e) => { console.error("[analyze] current call failed:", e.message); return "{}"; }),
-      makeCallWithTimeout(anthropic, higherTF,   "higher",   false, mime, base64).catch((e) => { console.error("[analyze] higher call failed:",  e.message); return "{}"; }),
-      makeCallWithTimeout(anthropic, highestTF,  "highest",  false, mime, base64).catch((e) => { console.error("[analyze] highest call failed:", e.message); return "{}"; }),
+      callClaude(SIMPLE_PROMPT,           timeframe, mime, base64, 600)
+        .catch((e) => { console.error("[analyze] current FAILED:", e.message); return "{}"; }),
+      callClaude(CONTEXT_PROMPT(higherTF),  higherTF,  mime, base64, 300)
+        .catch((e) => { console.error("[analyze] higher FAILED:",  e.message); return "{}"; }),
+      callClaude(CONTEXT_PROMPT(highestTF), highestTF, mime, base64, 300)
+        .catch((e) => { console.error("[analyze] highest FAILED:", e.message); return "{}"; }),
     ]);
 
-    const current = parseAnalysis(raw1, timeframe) as Record<string, unknown>;
-    const higher  = parseAnalysis(raw2, higherTF)  as Record<string, unknown>;
-    const highest = parseAnalysis(raw3, highestTF) as Record<string, unknown>;
+    console.log(`[analyze] all calls returned`);
 
-    // Guarantee bias exists so downstream code never crashes
-    if (!current.bias) current.bias = "NEUTRAL";
-    if (!higher.bias)  higher.bias  = "NEUTRAL";
-    if (!highest.bias) highest.bias = "NEUTRAL";
+    const current = parseRaw(raw1, timeframe, false);
+    const higher  = parseRaw(raw2, higherTF,  true);
+    const highest = parseRaw(raw3, highestTF, true);
 
     const biases = [current.bias, higher.bias, highest.bias] as string[];
     const bull   = biases.filter((b) => b === "BULLISH").length;
@@ -229,44 +245,37 @@ export async function POST(req: Request) {
     if (!isPro) {
       const entry = usageMap.get(ip)!;
       entry.count += 1;
-      console.log("COUNT:", ip, entry.count);
+      console.log(`[analyze] usage recorded — ip:${ip} count:${entry.count}`);
     }
 
-    // ── Save to journal (non-fatal) ────────────────────────────
+    // ── Journal save (non-fatal) ───────────────────────────────
     let journalId: string | null = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const setup  = (current as any).tradeSetup ?? {};
-      const signal = BIAS_TO_SIGNAL[current.bias as string] ?? current.bias ?? null;
+      const setup  = (current.tradeSetup as Record<string, string>) ?? {};
+      const signal = current.bias === "BULLISH" ? "LONG" : current.bias === "BEARISH" ? "SHORT" : "NEUTRAL";
       const payload = {
         asset,
-        timeframe:   (current.timeframe as string)   ?? timeframe,
+        timeframe:   (current.timeframe as string) ?? timeframe,
         signal,
         entry:       setup.entry       ?? null,
         stop_loss:   setup.stopLoss    ?? null,
         take_profit: setup.takeProfit1 ?? null,
         risk_reward: setup.riskReward  ?? null,
-        summary:     (current.summary as string)     ?? null,
+        summary:     (current.summary as string) ?? null,
         confidence:  typeof current.confidence === "number" ? current.confidence : null,
       };
-      console.log("[journal] saving:", JSON.stringify(payload));
+      console.log("[journal] save payload:", JSON.stringify(payload));
       const { data: jData, error: jError } = await getSupabase()
-        .from("journal")
-        .insert(payload)
-        .select("id")
-        .single();
-      if (jError) console.error("[journal] insert error:", jError.code, jError.message);
+        .from("journal").insert(payload).select("id").single();
+      if (jError) console.error("[journal] error:", jError.code, jError.message);
       else { journalId = jData?.id ?? null; console.log("[journal] saved id:", journalId); }
-    } catch (saveErr) {
-      console.error("[journal] exception:", saveErr);
-    }
+    } catch (e) { console.error("[journal] exception:", e); }
 
-    // Fire-and-forget alerts
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const setup = (current as any).tradeSetup ?? {};
+    // ── Alerts (fire-and-forget) ───────────────────────────────
+    const setup = (current.tradeSetup as Record<string, string>) ?? {};
     checkAndSendAlerts({
       pair:       asset,
-      signal:     BIAS_TO_SIGNAL[current.bias as string] ?? (current.bias as string) ?? "",
+      signal:     current.bias === "BULLISH" ? "LONG" : current.bias === "BEARISH" ? "SHORT" : "NEUTRAL",
       confidence: typeof current.confidence === "number" ? current.confidence : 0,
       entry:      setup.entry       ?? null,
       stopLoss:   setup.stopLoss    ?? null,
@@ -275,6 +284,8 @@ export async function POST(req: Request) {
     }).catch((e) => console.error("[alerts]", e));
 
     const usedNow = isPro ? null : (usageMap.get(ip)?.count ?? 1);
+    console.log(`[analyze] DONE — bias:${current.bias} confidence:${current.confidence} journalId:${journalId}`);
+
     return NextResponse.json(
       {
         success: true,
