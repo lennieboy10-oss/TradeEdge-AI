@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useUserPlan } from "@/app/lib/plan-context";
 import { motion } from "framer-motion";
 
 // ── Types ──────────────────────────────────────────────────────
@@ -1484,7 +1485,7 @@ export default function App() {
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [usedToday, setUsedToday]           = useState(0);
   const [clientId, setClientId]             = useState<string | null>(null);
-  const [plan, setPlan]                     = useState("free");
+  const { plan } = useUserPlan();
   const fileRef       = useRef<HTMLInputElement>(null);
   const resultsRef    = useRef<HTMLDivElement>(null);
   const [chartBase64, setChartBase64]   = useState<string | null>(null);
@@ -1502,7 +1503,6 @@ export default function App() {
       localStorage.setItem("ciq_client_id", id);
     }
     setClientId(id);
-    setPlan(localStorage.getItem("ciq_plan") ?? "free");
 
     // Usage counter
     const today = new Date().toISOString().slice(0, 10);
@@ -1525,46 +1525,6 @@ export default function App() {
       .then((d) => { if (Array.isArray(d.events)) setCalendarEvents(d.events); })
       .catch(() => {});
 
-    // Session guard: verified pro in this tab (just upgraded)
-    if (sessionStorage.getItem("ciq_verified_pro") === "true") {
-      setPlan("pro");
-      localStorage.setItem("ciq_plan", "pro");
-      console.log("[plan] session-verified pro");
-      return;
-    }
-
-    // 24-hour cache guard: confirmed pro recently — skip Supabase fetch entirely
-    const cachedPlan = localStorage.getItem("ciq_plan") ?? "free";
-    const checkedAt  = parseInt(localStorage.getItem("ciq_plan_checked_at") || "0", 10);
-    if (cachedPlan === "pro" && Date.now() - checkedAt < 24 * 60 * 60 * 1000) {
-      setPlan("pro");
-      sessionStorage.setItem("ciq_verified_pro", "true");
-      console.log("[plan] 24h-cache pro");
-      return;
-    }
-
-    // Fetch from Supabase — never downgrade pro→free if we have a local pro claim
-    fetch(`/api/user/plan?client_id=${id}`)
-      .then((r) => r.json())
-      .then((d) => {
-        const serverPlan = d.plan as string | null; // "pro" | "free" | null (null = not found yet)
-        console.log("[plan] Supabase returned:", serverPlan);
-        if (serverPlan === "pro") {
-          setPlan("pro");
-          localStorage.setItem("ciq_plan", "pro");
-          localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
-          sessionStorage.setItem("ciq_verified_pro", "true");
-        } else if (serverPlan === "free") {
-          // Only downgrade if we have no local pro claim
-          if (cachedPlan !== "pro") {
-            setPlan("free");
-            localStorage.setItem("ciq_plan", "free");
-          }
-          localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
-        }
-        // null → profile not found (webhook not fired yet) — keep cached value
-      })
-      .catch(() => {});
   }, []);
 
   // Scroll-reveal

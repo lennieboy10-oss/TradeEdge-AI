@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useUserPlan } from "@/app/lib/plan-context";
 
 function LogoMark() {
   return (
@@ -37,12 +38,13 @@ function AnimatedCheck() {
 }
 
 function DashboardContent() {
-  const params    = useSearchParams();
-  const router    = useRouter();
-  const upgraded  = params.get("upgraded")   === "true";
-  const sessionId = params.get("session_id") ?? null;
-  const [ready,   setReady]  = useState(false);
-  const [status,  setStatus] = useState("Activating your Pro plan…");
+  const params      = useSearchParams();
+  const router      = useRouter();
+  const { confirmPro } = useUserPlan();
+  const upgraded    = params.get("upgraded")   === "true";
+  const sessionId   = params.get("session_id") ?? null;
+  const [ready,     setReady]  = useState(false);
+  const [status,    setStatus] = useState("Activating your Pro plan…");
 
   useEffect(() => {
     if (!upgraded) { router.replace("/"); return; }
@@ -62,9 +64,7 @@ function DashboardContent() {
           const data = await res.json();
           console.log("[dashboard] activate result:", data);
           if (data.plan === "pro") {
-            localStorage.setItem("ciq_plan", "pro");
-            localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
-            sessionStorage.setItem("ciq_verified_pro", "true");
+            confirmPro();
             setReady(true);
             return;
           }
@@ -82,9 +82,7 @@ function DashboardContent() {
           const data = await res.json();
           console.log(`[dashboard] poll attempt ${attempts}:`, data.plan);
           if (data.plan === "pro") {
-            localStorage.setItem("ciq_plan", "pro");
-            localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
-            sessionStorage.setItem("ciq_verified_pro", "true");
+            confirmPro();
             setReady(true);
             return;
           }
@@ -94,9 +92,7 @@ function DashboardContent() {
         } else {
           // Last resort — payment completed so mark as pro; webhook/activate failed
           console.warn("[dashboard] could not confirm pro in Supabase after 8 attempts");
-          localStorage.setItem("ciq_plan", "pro");
-          localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
-          sessionStorage.setItem("ciq_verified_pro", "true");
+          confirmPro();
           setReady(true);
         }
       };

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, DM_Mono, Bebas_Neue } from "next/font/google";
 import TickerBar from "./components/TickerBar";
+import { Providers } from "./providers";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -40,8 +41,10 @@ export default function RootLayout({
       className={`${plusJakarta.variable} ${dmMono.variable} ${bebasNeue.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <TickerBar />
-        {children}
+        <Providers>
+          <TickerBar />
+          {children}
+        </Providers>
       </body>
     </html>
   );

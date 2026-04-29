@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useUserPlan } from "@/app/lib/plan-context";
 
 function LogoMark() {
   return (
@@ -14,13 +15,10 @@ function LogoMark() {
   );
 }
 
-type UserData = { plan: string; email: string | null; totalAnalyses: number };
-
 export default function Account() {
-  const [clientId, setClientId]   = useState<string | null>(null);
-  const [userData, setUserData]   = useState<UserData>({ plan: "free", email: null, totalAnalyses: 0 });
-  const [loading,  setLoading]    = useState(true);
-  const [portalLoading, setPortalLoading] = useState(false);
+  const { plan, isPro, email, totalAnalyses } = useUserPlan();
+  const [clientId, setClientId]               = useState<string | null>(null);
+  const [portalLoading, setPortalLoading]     = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   useEffect(() => {
@@ -30,15 +28,6 @@ export default function Account() {
       localStorage.setItem("ciq_client_id", id);
     }
     setClientId(id);
-
-    fetch(`/api/user/plan?client_id=${id}`)
-      .then((r) => r.json())
-      .then((d: UserData) => {
-        setUserData(d);
-        localStorage.setItem("ciq_plan", d.plan ?? "free");
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
   }, []);
 
   async function handlePortal() {
@@ -72,7 +61,6 @@ export default function Account() {
     setCheckoutLoading(false);
   }
 
-  const isPro = userData.plan === "pro";
 
   return (
     <div className="min-h-screen bg-[#080a10] text-white">
@@ -108,18 +96,11 @@ export default function Account() {
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight">Your Plan</h1>
             <p className="text-[#6b7280] text-sm mt-1">
-              {userData.email ?? "No email on file"}
+              {email ?? "No email on file"}
             </p>
           </div>
 
-          {loading ? (
-            <div className="space-y-4">
-              {[1, 2].map((i) => (
-                <div key={i} className="skeleton h-24 rounded-2xl" />
-              ))}
-            </div>
-          ) : (
-            <motion.div
+          <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
@@ -189,7 +170,7 @@ export default function Account() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 text-center">
                     <p className="text-[28px] font-extrabold text-[#f5c518] leading-none mb-1">
-                      {userData.totalAnalyses}
+                      {totalAnalyses}
                     </p>
                     <p className="text-[#6b7280] text-xs">Total Analyses</p>
                   </div>
@@ -233,7 +214,6 @@ export default function Account() {
                 </Link>
               </div>
             </motion.div>
-          )}
         </div>
       </main>
     </div>
