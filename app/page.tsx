@@ -1612,8 +1612,14 @@ export default function App() {
     fd.append("timeframe", selectedTF);
     if (asset.trim())  fd.append("asset", asset.trim());
     if (clientId)      fd.append("client_id", clientId);
+
+    // Client-side 90 s abort so the spinner never runs forever
+    const controller = new AbortController();
+    const clientTimeout = setTimeout(() => controller.abort(), 90_000);
+
     try {
-      const res  = await fetch("/api/analyze", { method: "POST", body: fd });
+      const res  = await fetch("/api/analyze", { method: "POST", body: fd, signal: controller.signal });
+      clearTimeout(clientTimeout);
       const data = await res.json();
 
       if (res.status === 429) {
@@ -1637,10 +1643,14 @@ export default function App() {
           localStorage.setItem("ciq_date", today);
         }
       } else {
-        setError(data.error || "Analysis failed. Please try again.");
+        setError(data.error || "Analysis failed — please try again.");
       }
-    } catch {
-      setError("Network error. Please check your connection.");
+    } catch (err: unknown) {
+      clearTimeout(clientTimeout);
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      setError(isAbort
+        ? "Analysis timed out — the AI is busy. Please try again in a moment."
+        : "Network error — please check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -1993,7 +2003,7 @@ export default function App() {
               <button onClick={handleAnalyze} disabled={!file || loading}
                 className="btn-yellow w-full py-3.5 mt-3 text-sm flex items-center justify-center gap-2">
                 {loading ? (
-                  <><span className="w-4 h-4 rounded-full border-2 border-[#080a10]/25 border-t-[#080a10] animate-spin-btn" />Analyzing with GPT-4o…</>
+                  <><span className="w-4 h-4 rounded-full border-2 border-[#080a10]/25 border-t-[#080a10] animate-spin-btn" />Analysing chart…</>
                 ) : "⚡ Analyze My Chart"}
               </button>
 
