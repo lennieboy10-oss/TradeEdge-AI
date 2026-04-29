@@ -14,6 +14,16 @@ type AnalysisResult = {
   indicators: { rsi: string; macd: string; maCross: string };
   confluences: string[];
   warnings: string[];
+  // Pro-only fields
+  tradeScore?: string;
+  fibonacci?: { keyLevels: string[]; context: string };
+  volumeAnalysis?: string;
+  marketStructure?: string;
+  momentum?: string;
+  priceLevels?: string[];
+  invalidationLevel?: string;
+  bestSession?: string;
+  historicalSetups?: { pattern: string; asset: string; period: string; result: string }[];
 };
 
 type MultiResult = {
@@ -520,6 +530,23 @@ function MidnightCountdown() {
   return <span className="font-dm-mono text-[#00e676] text-2xl font-semibold tracking-widest">{time}</span>;
 }
 
+// ── Analysis expiry countdown (10 min from mount) ─────────────
+function AnalysisExpiry() {
+  const [secs, setSecs] = useState(600);
+  useEffect(() => {
+    const t = setInterval(() => setSecs((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  const expired = secs === 0;
+  return (
+    <span className="font-dm-mono font-bold" style={{ color: secs < 120 ? "#f87171" : "#f59e0b" }}>
+      {expired ? "EXPIRED" : `${m}:${String(s).padStart(2, "0")}`}
+    </span>
+  );
+}
+
 // ── Daily limit modal ──────────────────────────────────────────
 function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: string | null }) {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -537,46 +564,86 @@ function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: stri
     } catch { /* silent */ }
     setCheckoutLoading(false);
   }
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto"
       style={{ background: "rgba(4, 6, 10, 0.94)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" }}>
       <motion.div
         initial={{ opacity: 0, scale: 0.88, y: 24 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: "spring", bounce: 0.22, duration: 0.5 }}
-        className="w-full max-w-sm rounded-2xl p-8 text-center"
+        className="w-full max-w-sm rounded-2xl p-7 text-center my-4"
         style={{
           background: "#080c0a",
           border: "1px solid rgba(0,230,118,0.28)",
           boxShadow: "0 0 60px rgba(0,230,118,0.07), 0 24px 64px rgba(0,0,0,0.55)",
         }}
       >
-        <div className="w-16 h-16 mx-auto mb-5 rounded-full flex items-center justify-center"
-          style={{ background: "rgba(0,230,118,0.09)", border: "1px solid rgba(0,230,118,0.22)" }}>
-          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-            <circle cx="13" cy="13" r="10" stroke="#00e676" strokeWidth="1.5" />
-            <path d="M13 8v6M13 17v1" stroke="#00e676" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        </div>
-
-        <h2 className="font-bebas text-[40px] leading-none tracking-[0.05em] text-white mb-3">
+        {/* Header */}
+        <h2 className="font-bebas text-[38px] leading-none tracking-[0.05em] text-white mb-1">
           DAILY LIMIT REACHED
         </h2>
+        <p className="text-[#6b7280] text-sm mb-4">You&apos;ve used all 3 free analyses today.</p>
 
-        <p className="text-[#6b7280] text-sm leading-relaxed mb-1">
-          You&apos;ve used your 3 free analyses today.
-        </p>
-        <p className="text-[#6b7280] text-sm leading-relaxed mb-6">
-          Upgrade to Pro for unlimited chart analysis.
-        </p>
+        {/* "You just missed" — blurred Pro features */}
+        <div className="rounded-xl overflow-hidden mb-4"
+          style={{ border: "1px solid rgba(0,230,118,0.15)", background: "rgba(0,230,118,0.04)" }}>
+          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <path d="M1 9L3.5 5.5L6 7.5L9.5 2.5" stroke="#f59e0b" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#f59e0b] font-semibold">
+              You just missed
+            </p>
+          </div>
+          <div className="p-3 space-y-1.5 select-none" style={{ filter: "blur(3px)", pointerEvents: "none" }}>
+            {[
+              { label: "Trade Score", value: "A+", color: "#00e676" },
+              { label: "Fibonacci", value: "0.618 at $67,420", color: "#f59e0b" },
+              { label: "Invalidation", value: "$65,200 — bearish break", color: "#f87171" },
+              { label: "Historical Match", value: "BTC Bull Flag · Mar 2024 · +18%", color: "#c084fc" },
+            ].map((row) => (
+              <div key={row.label} className="flex justify-between items-center py-1.5 border-b border-white/[0.04] last:border-0">
+                <span className="text-[#6b7280] text-xs">{row.label}</span>
+                <span className="font-dm-mono text-xs font-bold" style={{ color: row.color }}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
 
-        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] py-4 px-6 mb-6">
-          <p className="text-[#4b5563] text-[10px] uppercase tracking-[0.15em] mb-2 font-semibold font-dm-mono">
-            Resets in
+        {/* Analysis expiry warning */}
+        <div className="rounded-xl border border-[#f59e0b]/20 bg-[#f59e0b]/[0.06] p-3 mb-4 flex items-center gap-3">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0">
+            <circle cx="8" cy="8" r="6.5" stroke="#f59e0b" strokeWidth="1.2"/>
+            <path d="M8 5v3.5l2 2" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <p className="font-dm-mono text-[11px] text-[#fcd34d] text-left">
+            This analysis expires in <AnalysisExpiry /> — upgrade now to save it to your journal
+          </p>
+        </div>
+
+        {/* Social proof */}
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 mb-4 flex items-center justify-between">
+          <div className="flex -space-x-2">
+            {["#00e676","#f59e0b","#c084fc","#38bdf8"].map((c, i) => (
+              <div key={i} className="w-6 h-6 rounded-full border-2 border-[#080c0a]"
+                style={{ background: `${c}40`, borderColor: "#080c0a" }} />
+            ))}
+          </div>
+          <p className="font-dm-mono text-[10px] text-[#6b7280] text-right">
+            <span className="text-white font-bold">847 traders</span> upgraded this week
+          </p>
+        </div>
+
+        {/* Resets in */}
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] py-3 px-4 mb-4 flex items-center justify-between">
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#4b5563] font-semibold">
+            Free tier resets in
           </p>
           <MidnightCountdown />
         </div>
 
+        {/* CTA */}
         <button
           onClick={handleUpgrade}
           disabled={checkoutLoading}
@@ -587,15 +654,235 @@ function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: stri
             boxShadow: "0 0 28px rgba(0,230,118,0.32), 0 4px 16px rgba(0,0,0,0.3)",
           }}
         >
-          {checkoutLoading ? "Redirecting…" : "Upgrade to Pro — £19/mo"}
+          {checkoutLoading ? "Redirecting…" : "Unlock Full Analysis — £19/mo"}
         </button>
 
+        {/* 7-day guarantee */}
+        <p className="font-dm-mono text-[10px] text-[#4b5563] mb-3">
+          7-day money back guarantee · Cancel anytime
+        </p>
+
         <button onClick={onClose}
-          className="text-[#4b5563] text-sm hover:text-[#9ca3af] transition-colors">
-          Remind me tomorrow
+          className="text-[#4b5563] text-xs hover:text-[#9ca3af] transition-colors">
+          No thanks, wait until tomorrow
         </button>
       </motion.div>
     </div>
+  );
+}
+
+// ── Pro glow wrapper ───────────────────────────────────────────
+function ProGlowCard({ children, color }: { children: React.ReactNode; color: string }) {
+  return (
+    <div className="relative">
+      <div className="absolute -inset-px rounded-2xl pointer-events-none"
+        style={{ background: `linear-gradient(135deg, ${color}40 0%, transparent 50%, ${color}20 100%)`, filter: "blur(1px)" }} />
+      <div className="absolute -inset-0.5 rounded-2xl pointer-events-none opacity-60"
+        style={{ boxShadow: `0 0 30px ${color}30, 0 0 60px ${color}15, inset 0 0 30px ${color}08` }} />
+      <motion.div
+        animate={{ opacity: [0.5, 1, 0.5] }}
+        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        className="absolute -inset-px rounded-2xl pointer-events-none"
+        style={{ border: `1px solid ${color}50` }}
+      />
+      {children}
+    </div>
+  );
+}
+
+// ── Background particles (Pro only) ───────────────────────────
+function ProParticles({ color }: { color: string }) {
+  const particles = Array.from({ length: 12 }, (_, i) => ({
+    id: i,
+    x: Math.random() * 100,
+    y: Math.random() * 100,
+    size: Math.random() * 3 + 1,
+    duration: Math.random() * 4 + 3,
+    delay: Math.random() * 3,
+  }));
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-2xl">
+      {particles.map((p) => (
+        <motion.div key={p.id}
+          className="absolute rounded-full"
+          style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.size, height: p.size, background: color, opacity: 0 }}
+          animate={{ opacity: [0, 0.6, 0], y: [-10, -30], scale: [0.5, 1, 0.3] }}
+          transition={{ duration: p.duration, repeat: Infinity, delay: p.delay, ease: "easeOut" }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Trade Score badge ──────────────────────────────────────────
+function TradeScore({ grade }: { grade: string }) {
+  const cfg: Record<string, { color: string; bg: string; border: string; label: string }> = {
+    "A+": { color: "#00e676", bg: "rgba(0,230,118,0.1)",   border: "rgba(0,230,118,0.35)",  label: "Perfect setup" },
+    "A":  { color: "#4ade80", bg: "rgba(74,222,128,0.1)",  border: "rgba(74,222,128,0.35)", label: "Strong setup" },
+    "B":  { color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.35)", label: "Decent setup" },
+    "C":  { color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.3)", label: "Trade with caution" },
+    "D":  { color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)",   label: "Avoid this trade" },
+  };
+  const c = cfg[grade] ?? cfg["B"];
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
+      transition={{ delay: 0.3, type: "spring", bounce: 0.4 }}
+      className="rounded-2xl p-4 flex items-center justify-between"
+      style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+      <div>
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#6b7280] mb-0.5">Trade Score</p>
+        <p className="text-sm font-semibold" style={{ color: c.color }}>{c.label}</p>
+      </div>
+      <motion.div
+        animate={{ boxShadow: [`0 0 12px ${c.color}40`, `0 0 28px ${c.color}80`, `0 0 12px ${c.color}40`] }}
+        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+        className="font-bebas text-[52px] leading-none"
+        style={{ color: c.color }}>
+        {grade}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ── Historical setups ──────────────────────────────────────────
+function HistoricalSetups({ setups }: { setups: { pattern: string; asset: string; period: string; result: string }[] }) {
+  return (
+    <motion.div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4"
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 1.6, duration: 0.4 }}>
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
+          style={{ background: "rgba(192,132,252,0.15)" }}>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M1 8V3l4-2 4 2v5" stroke="#c084fc" strokeWidth="1.1" strokeLinecap="round"/>
+            <rect x="3" y="5" width="4" height="4" rx="0.5" stroke="#c084fc" strokeWidth="1.1"/>
+          </svg>
+        </div>
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#c084fc] font-semibold">Similar Historical Setups</p>
+      </div>
+      <div className="space-y-3">
+        {setups.map((s, i) => (
+          <div key={i} className="rounded-xl p-3" style={{ background: "rgba(192,132,252,0.04)", border: "1px solid rgba(192,132,252,0.12)" }}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-dm-mono text-[10px] font-bold text-[#c084fc] uppercase">{s.pattern}</span>
+              <span className="text-[#4b5563] text-[10px]">·</span>
+              <span className="font-dm-mono text-[10px] text-[#6b7280]">{s.asset}</span>
+              <span className="ml-auto font-dm-mono text-[9px] text-[#4b5563]">{s.period}</span>
+            </div>
+            <p className="text-[#9ca3af] text-xs leading-relaxed">{s.result}</p>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Pro deep analysis panel ────────────────────────────────────
+function ProDeepAnalysis({ a }: { a: AnalysisResult }) {
+  return (
+    <motion.div className="space-y-3"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}>
+
+      {/* Fibonacci */}
+      {a.fibonacci && (
+        <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#f59e0b] font-semibold mb-3">Fibonacci Levels</p>
+          <div className="space-y-1.5 mb-2">
+            {a.fibonacci.keyLevels.map((l, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] flex-shrink-0" />
+                <span className="font-dm-mono text-[#d1d5db]">{l}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[#6b7280] text-xs italic">{a.fibonacci.context}</p>
+        </div>
+      )}
+
+      {/* Volume + Structure + Momentum row */}
+      {(a.volumeAnalysis || a.marketStructure || a.momentum) && (
+        <div className="grid grid-cols-1 gap-2">
+          {[
+            { label: "Volume",   value: a.volumeAnalysis,   color: "#38bdf8" },
+            { label: "Structure", value: a.marketStructure, color: "#a78bfa" },
+            { label: "Momentum", value: a.momentum,         color: "#f472b6" },
+          ].filter(r => r.value).map((row) => (
+            <div key={row.label} className="rounded-xl p-3 flex gap-3 items-start"
+              style={{ background: `${row.color}08`, border: `1px solid ${row.color}18` }}>
+              <span className="font-dm-mono text-[9px] uppercase tracking-widest font-bold flex-shrink-0 mt-0.5"
+                style={{ color: row.color }}>{row.label}</span>
+              <p className="text-[#9ca3af] text-xs leading-relaxed">{row.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Price levels to watch */}
+      {a.priceLevels && a.priceLevels.length > 0 && (
+        <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#38bdf8] font-semibold mb-3">Price Levels to Watch</p>
+          <div className="space-y-2">
+            {a.priceLevels.map((l, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <span className="font-dm-mono text-[#38bdf8] text-[11px] font-bold flex-shrink-0">{i + 1}.</span>
+                <span className="text-[#d1d5db] text-xs">{l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Invalidation + Session row */}
+      <div className="grid grid-cols-2 gap-3">
+        {a.invalidationLevel && (
+          <div className="rounded-xl p-3" style={{ background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.18)" }}>
+            <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#f87171] font-semibold mb-1.5">Invalidation</p>
+            <p className="text-[#d1d5db] text-xs leading-relaxed">{a.invalidationLevel}</p>
+          </div>
+        )}
+        {a.bestSession && (
+          <div className="rounded-xl p-3" style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
+            <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#00e676] font-semibold mb-1.5">Best Session</p>
+            <p className="font-bebas text-2xl text-white leading-none">{a.bestSession}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Historical setups */}
+      {a.historicalSetups && a.historicalSetups.length > 0 && (
+        <HistoricalSetups setups={a.historicalSetups} />
+      )}
+    </motion.div>
+  );
+}
+
+// ── Free watermark overlay ─────────────────────────────────────
+function FreeWatermark({ onUpgrade }: { onUpgrade: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.6, duration: 0.4 }}
+      className="rounded-2xl overflow-hidden"
+      style={{ border: "1px solid rgba(0,230,118,0.15)", background: "rgba(0,230,118,0.03)" }}>
+      <div className="p-4 text-center">
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#4b5563] mb-2 font-semibold">
+          Pro analysis hidden
+        </p>
+        <div className="flex flex-wrap justify-center gap-2 mb-3">
+          {["Trade Score", "Fibonacci Levels", "Volume Analysis", "Market Structure", "Momentum", "Price Levels", "Invalidation", "Historical Setups"].map((f) => (
+            <span key={f} className="font-dm-mono text-[10px] px-2 py-0.5 rounded-full"
+              style={{ background: "rgba(0,230,118,0.08)", border: "1px solid rgba(0,230,118,0.18)", color: "#4b5563" }}>
+              {f}
+            </span>
+          ))}
+        </div>
+        <button onClick={onUpgrade}
+          className="px-6 py-2.5 rounded-xl text-xs font-bold transition-all hover:-translate-y-0.5"
+          style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 20px rgba(0,230,118,0.35)" }}>
+          Unlock 8 More Insights — £19/mo
+        </button>
+      </div>
+    </motion.div>
   );
 }
 
@@ -1637,7 +1924,10 @@ export default function App() {
             </div>
 
             {/* ── Results card ── */}
-            <div className="card-dark p-7" data-animate data-delay="2">
+            <div className={`card-dark p-7 relative overflow-hidden transition-all duration-500 ${isPro && result ? "ring-1 ring-[#00e676]/30" : ""}`}
+              style={isPro && result ? { boxShadow: "0 0 40px rgba(0,230,118,0.08), 0 0 80px rgba(0,230,118,0.04)" } : {}}
+              data-animate data-delay="2">
+              {isPro && result && <ProParticles color={biasColor} />}
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <h3 className="text-lg font-bold text-white">Analysis Results</h3>
@@ -1733,19 +2023,39 @@ export default function App() {
                       <div className="space-y-3 relative">
                         <ScanLine color={biasColor} />
                         <motion.div className="rounded-2xl border p-4 flex items-center justify-between gap-4 relative overflow-hidden"
-                          style={{ borderColor: `${biasColor}35`, background: `${biasColor}0d` }}
+                          style={{ borderColor: `${biasColor}35`, background: `${biasColor}0d`,
+                            boxShadow: isPro ? `0 0 20px ${biasColor}20` : undefined }}
                           initial={{ opacity: 0, scale: 0.88 }} animate={{ opacity: 1, scale: 1 }}
                           transition={{ delay: 0, duration: 0.45, type: "spring", bounce: 0.28 }}>
                           <ParticleBurst color={biasColor} />
                           <div style={{ position: "relative", zIndex: 1 }}>
                             <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Bias</p>
-                            <p className="text-2xl font-extrabold" style={{ color: biasColor, textShadow: `0 0 20px ${biasColor}60` }}>{a.bias}</p>
+                            <motion.p className="text-2xl font-extrabold"
+                              style={{ color: biasColor }}
+                              animate={isPro ? { textShadow: [`0 0 20px ${biasColor}60`, `0 0 40px ${biasColor}90`, `0 0 20px ${biasColor}60`] } : {}}
+                              transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}>
+                              {a.bias}
+                            </motion.p>
                           </div>
-                          <div className="text-right" style={{ position: "relative", zIndex: 1 }}>
-                            <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Timeframe</p>
-                            <p className="font-dm-mono text-xl font-bold text-white">{a.timeframe}</p>
+                          <div className="flex items-center gap-3" style={{ position: "relative", zIndex: 1 }}>
+                            {isPro && (
+                              <motion.span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                style={{ background: "rgba(0,230,118,0.15)", color: "#00e676", border: "1px solid rgba(0,230,118,0.3)" }}
+                                animate={{ boxShadow: ["0 0 4px rgba(0,230,118,0.3)", "0 0 12px rgba(0,230,118,0.7)", "0 0 4px rgba(0,230,118,0.3)"] }}
+                                transition={{ duration: 1.8, repeat: Infinity }}>
+                                PRO
+                              </motion.span>
+                            )}
+                            <div className="text-right">
+                              <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Timeframe</p>
+                              <p className="font-dm-mono text-xl font-bold text-white">{a.timeframe}</p>
+                            </div>
                           </div>
                         </motion.div>
+
+                        {/* Trade Score — Pro only */}
+                        {isPro && a.tradeScore && <TradeScore grade={a.tradeScore} />}
+
                         <motion.div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] py-6 flex justify-center"
                           initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 0.28, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
@@ -1820,6 +2130,19 @@ export default function App() {
                             <p className="text-[#fbbf24] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
                             {a.warnings.map((w, i) => <p key={i} className="text-[#fcd34d] text-sm mt-1">· {w}</p>)}
                           </motion.div>
+                        )}
+
+                        {/* Pro deep analysis — Pro only */}
+                        {isPro && <ProDeepAnalysis a={a} />}
+
+                        {/* Free watermark — nudges upgrade */}
+                        {!isPro && (
+                          <FreeWatermark onUpgrade={() => {
+                            if (clientId) {
+                              fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+                                .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
+                            }
+                          }} />
                         )}
                       </div>
                     );
