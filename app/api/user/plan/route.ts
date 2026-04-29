@@ -17,8 +17,9 @@ export async function GET(req: Request) {
     supabase.from("journal").select("id", { count: "exact", head: true }),
   ]);
 
+  // Return null when profile not found so client won't downgrade a local "pro" claim
   return NextResponse.json({
-    plan:          profileRes.data?.plan  ?? "free",
+    plan:          profileRes.data?.plan  ?? null,
     email:         profileRes.data?.email ?? null,
     totalAnalyses: countRes.count         ?? 0,
   });

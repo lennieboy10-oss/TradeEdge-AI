@@ -1524,25 +1524,44 @@ export default function App() {
       .then((d) => { if (Array.isArray(d.events)) setCalendarEvents(d.events); })
       .catch(() => {});
 
-    // If we verified pro in this browser session (just upgraded), trust it —
-    // don't let a slow/failed Supabase fetch revert the plan.
+    // Session guard: verified pro in this tab (just upgraded)
     if (sessionStorage.getItem("ciq_verified_pro") === "true") {
       setPlan("pro");
       localStorage.setItem("ciq_plan", "pro");
-      console.log("Current plan from Supabase: pro (session-verified)");
+      console.log("[plan] session-verified pro");
       return;
     }
 
-    // Otherwise fetch from Supabase — source of truth on fresh loads
+    // 24-hour cache guard: confirmed pro recently — skip Supabase fetch entirely
+    const cachedPlan = localStorage.getItem("ciq_plan") ?? "free";
+    const checkedAt  = parseInt(localStorage.getItem("ciq_plan_checked_at") || "0", 10);
+    if (cachedPlan === "pro" && Date.now() - checkedAt < 24 * 60 * 60 * 1000) {
+      setPlan("pro");
+      sessionStorage.setItem("ciq_verified_pro", "true");
+      console.log("[plan] 24h-cache pro");
+      return;
+    }
+
+    // Fetch from Supabase — never downgrade pro→free if we have a local pro claim
     fetch(`/api/user/plan?client_id=${id}`)
       .then((r) => r.json())
       .then((d) => {
-        const serverPlan = d.plan ?? "free";
-        console.log("Current plan from Supabase:", serverPlan);
-        setPlan(serverPlan);
-        localStorage.setItem("ciq_plan", serverPlan);
-        // If Supabase confirms pro, persist it for this session too
-        if (serverPlan === "pro") sessionStorage.setItem("ciq_verified_pro", "true");
+        const serverPlan = d.plan as string | null; // "pro" | "free" | null (null = not found yet)
+        console.log("[plan] Supabase returned:", serverPlan);
+        if (serverPlan === "pro") {
+          setPlan("pro");
+          localStorage.setItem("ciq_plan", "pro");
+          localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
+          sessionStorage.setItem("ciq_verified_pro", "true");
+        } else if (serverPlan === "free") {
+          // Only downgrade if we have no local pro claim
+          if (cachedPlan !== "pro") {
+            setPlan("free");
+            localStorage.setItem("ciq_plan", "free");
+          }
+          localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
+        }
+        // null → profile not found (webhook not fired yet) — keep cached value
       })
       .catch(() => {});
   }, []);

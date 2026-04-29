@@ -63,6 +63,7 @@ function DashboardContent() {
           console.log("[dashboard] activate result:", data);
           if (data.plan === "pro") {
             localStorage.setItem("ciq_plan", "pro");
+            localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
             sessionStorage.setItem("ciq_verified_pro", "true");
             setReady(true);
             return;
@@ -82,6 +83,7 @@ function DashboardContent() {
           console.log(`[dashboard] poll attempt ${attempts}:`, data.plan);
           if (data.plan === "pro") {
             localStorage.setItem("ciq_plan", "pro");
+            localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
             sessionStorage.setItem("ciq_verified_pro", "true");
             setReady(true);
             return;
@@ -93,6 +95,7 @@ function DashboardContent() {
           // Last resort — payment completed so mark as pro; webhook/activate failed
           console.warn("[dashboard] could not confirm pro in Supabase after 8 attempts");
           localStorage.setItem("ciq_plan", "pro");
+          localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
           sessionStorage.setItem("ciq_verified_pro", "true");
           setReady(true);
         }
