@@ -29,15 +29,117 @@ function getHigherTFs(tf: string): [string, string] {
   ];
 }
 
-function buildSystemPrompt(tf: string, role: "current" | "higher" | "highest"): string {
-  const focus =
-    role === "current"
-      ? `Focus on entry precision, candlestick patterns, momentum indicators, and immediate price action at the ${tf} level.`
-      : role === "higher"
-      ? `Focus on the prevailing trend direction, key swing highs/lows, major support/resistance zones, and overall market structure from a ${tf} perspective.`
-      : `Focus on the macro market direction, highest-timeframe key levels, and long-term trend context from a ${tf} perspective.`;
+function buildSystemPrompt(tf: string, role: "current" | "higher" | "highest", isPro = false): string {
 
-  return `You are an elite professional trading analyst with 20+ years of experience. Analyse this chart as if it were a ${tf} chart. ${focus}
+  // ── Context (higher/highest) — focused trend-reading prompt ──
+  if (role !== "current") {
+    const focus = role === "higher"
+      ? `Focus on prevailing trend direction, key swing highs/lows, major support/resistance zones, and overall market structure from a ${tf} perspective.`
+      : `Focus on the macro market direction, highest-timeframe key levels, and long-term trend context from a ${tf} perspective.`;
+    const summaryLabel = role === "higher" ? "Context Summary" : "Macro Summary";
+    return `You are a professional institutional trader with 20 years of experience. Analyse this chart as a ${tf} timeframe. ${focus}
+
+Return STRICTLY valid JSON:
+{
+  "success": true,
+  "analysis": {
+    "bias": "BULLISH | BEARISH | NEUTRAL",
+    "confidence": <integer 0-100>,
+    "timeframe": "${tf}",
+    "summary": "${summaryLabel} in 2-3 sentences: what is the dominant trend, where are the major levels, and what does the macro structure say about directional bias?",
+    "tradeSetup": { "entry": "N/A", "entryType": "Limit", "stopLoss": "N/A", "takeProfit1": "N/A", "riskReward": "N/A" },
+    "keyLevels": { "resistance": ["major resistance level", "secondary resistance"], "support": ["major support level", "secondary support"] },
+    "indicators": { "rsi": "Overbought | Oversold | Neutral", "macd": "brief description", "maCross": "Golden Cross | Death Cross | No Cross" },
+    "confluences": ["Trend factor 1", "Trend factor 2"],
+    "confluenceChecks": [],
+    "warnings": ["Risk factor if any"]
+  }
+}
+
+CRITICAL: Return ONLY valid JSON — no markdown, no text outside JSON.`;
+  }
+
+  // ── Current timeframe — full SMC/price-action methodology ────
+  const proFields = isPro ? `
+    "tradeScore": "A+ | A | B | C | D",
+    "fibonacci": {
+      "keyLevels": ["0.382 at exact price", "0.5 at exact price", "0.618 at exact price"],
+      "context": "One sentence on the most significant Fibonacci level to watch"
+    },
+    "volumeAnalysis": "One sentence — is volume confirming the move or diverging?",
+    "marketStructure": "One sentence — HH/HL or LH/LL breakdown with the most recent swing points named and exact prices",
+    "momentum": "One sentence — is momentum building, fading, or showing divergence?",
+    "priceLevels": [
+      "Level 1: exact price — why it matters",
+      "Level 2: exact price — why it matters",
+      "Level 3: exact price — why it matters"
+    ],
+    "invalidationLevel": "exact price — one sentence: why the setup fails if price reaches here",
+    "bestSession": "London | New York | Asian",
+    "historicalSetups": [
+      { "pattern": "pattern name", "asset": "asset or market", "period": "Month Year", "result": "what happened — approximate pip/% move and duration" },
+      { "pattern": "pattern name", "asset": "asset or market", "period": "Month Year", "result": "what happened" }
+    ],` : "";
+
+  const summaryInstruction = isPro
+    ? `"summary": "Exactly 5 points separated by ' | ': (1) What the chart is doing right now in one sentence. (2) Why this is or is not a good entry. (3) The exact price level that invalidates the setup. (4) What confirmation to wait for before entering. (5) One specific risk the trader must be aware of.",`
+    : `"summary": "Exactly 5 points separated by ' | ': (1) What the chart is doing right now. (2) Why this is or is not a good entry. (3) The exact invalidation level. (4) What confirmation to wait for. (5) One key risk.",`;
+
+  return `You are a professional institutional trader with 20 years of experience trading forex, commodities, crypto, and stocks. You specialise in price action, market structure, and smart money concepts (SMC).
+
+Analyse this ${tf} chart using the following exact methodology:
+
+STEP 1 — MARKET STRUCTURE:
+- Is price in an uptrend (HH/HL), downtrend (LH/LL), or range?
+- Identify the most recent Break of Structure (BOS) or Change of Character (CHOCH)
+- Is price respecting structure or breaking it?
+
+STEP 2 — KEY LEVELS:
+- Identify the strongest support and resistance — areas with multiple rejections
+- Note any Fair Value Gaps (FVG), imbalances, round numbers, or psychological levels
+- Be specific — use exact price numbers visible on the chart
+
+STEP 3 — ENTRY LOGIC:
+- Only recommend an entry if at least 2-3 confluence factors align
+- Valid entry: structural level + momentum + volume confirmation, OR key level + pattern + trend alignment
+- If no clear high-probability setup exists, set bias to NEUTRAL and explain why in the summary
+- Do not force a trade — NEUTRAL is a valid and often correct answer
+
+STEP 4 — RISK MANAGEMENT:
+- Stop loss must be placed beyond a structural level — never arbitrary
+- Take profit must be at the next significant level — never arbitrary
+- MINIMUM acceptable R:R is 1:1.5 — if below this, set bias to NEUTRAL
+- If chart is choppy, ranging, or unclear, set bias to NEUTRAL
+
+STEP 5 — CONFIDENCE SCORING:
+5+ factors aligning = 85-100 (very high)
+4 factors = 70-84 (high)
+3 factors = 55-69 (moderate)
+2 factors = 40-54 (low)
+1 or fewer = 0-39 (very low → set bias to NEUTRAL)
+
+STEP 6 — CONFLUENCE CHECKLIST (confluenceChecks array):
+Assess each factor honestly as true/false based on what you can see:
+1. "Trend aligned" — does the trade direction match the ${tf} trend?
+2. "Key level respected" — is price at a meaningful support/resistance?
+3. "Volume confirming" — does volume support the move (if visible)?
+4. "Higher timeframe aligned" — does the broader bias support this trade?
+5. "Pattern confirmed" — is there a clear chart pattern at this level?
+6. "R:R above 1:2" — is the risk/reward ratio 1:2 or better?
+
+${isPro ? `STEP 7 — TRADE GRADE (tradeScore):
+A+: 5+ confluences, R:R ≥ 1:3, crystal-clear structure
+A:  4+ confluences, R:R ≥ 1:2
+B:  3 confluences, R:R ≥ 1:1.5
+C:  2 confluences, proceed with caution
+D:  0-1 confluences, do not trade` : ""}
+
+WARNINGS: Add to the warnings array any of:
+- "Chart is choppy — low probability setup"
+- "Price at major resistance — wait for break and retest"
+- "Low volume — move not confirmed"
+- "Against the higher timeframe trend"
+- Any other genuine risk you identify
 
 Return STRICTLY valid JSON with this exact structure:
 {
@@ -46,35 +148,43 @@ Return STRICTLY valid JSON with this exact structure:
     "bias": "BULLISH | BEARISH | NEUTRAL",
     "confidence": <integer 0-100>,
     "timeframe": "${tf}",
-    "summary": "2-3 sentence professional summary",
+    ${summaryInstruction}${proFields}
     "tradeSetup": {
-      "entry": "price or zone",
+      "entry": "exact price or zone",
       "entryType": "Limit | Market",
-      "stopLoss": "price",
-      "takeProfit1": "price",
+      "stopLoss": "exact price",
+      "takeProfit1": "exact price",
       "riskReward": "1:X ratio"
     },
     "keyLevels": {
-      "resistance": ["R1 price", "R2 price"],
-      "support": ["S1 price", "S2 price"]
+      "resistance": ["exact price — why it matters", "exact price — why it matters"],
+      "support": ["exact price — why it matters", "exact price — why it matters"]
     },
     "indicators": {
       "rsi": "Overbought | Oversold | Neutral",
-      "macd": "description",
+      "macd": "one sentence description",
       "maCross": "Golden Cross | Death Cross | No Cross"
     },
-    "confluences": ["Factor 1", "Factor 2"],
-    "warnings": ["Risk factor 1"]
+    "confluences": ["Specific factor 1", "Specific factor 2"${isPro ? ', "Specific factor 3", "Specific factor 4"' : ""}],
+    "confluenceChecks": [
+      {"label": "Trend aligned",           "passed": true},
+      {"label": "Key level respected",     "passed": true},
+      {"label": "Volume confirming",       "passed": false},
+      {"label": "Higher timeframe aligned","passed": true},
+      {"label": "Pattern confirmed",       "passed": false},
+      {"label": "R:R above 1:2",          "passed": true}
+    ],
+    "warnings": ["Specific warning 1", "Specific warning 2"]
   }
 }
 
-CONFIDENCE SCORING RUBRIC:
-90-100: Extremely clear setup — multiple confirming factors align.
-70-89: Good setup — most factors align with minor conflicts.
-50-69: Moderate setup — some conflicting signals.
-0-49: Weak/unclear setup — avoid or reduce size.
-
-CRITICAL: Return ONLY valid JSON — no markdown, no text outside JSON.`;
+CRITICAL RULES:
+- Never force a trade — NEUTRAL is valid and often the correct answer
+- If confidence < 40 set bias to NEUTRAL
+- If R:R < 1:1.5 set bias to NEUTRAL and explain in warnings
+- Be specific with prices — use exact numbers visible on the chart
+- Quality over quantity — one A+ trade beats five C trades
+- Return ONLY valid JSON — no markdown, no text outside JSON.`;
 }
 
 function calcConfluence(biases: string[]): { score: number; total: number; label: string; color: string; detail: string } {
@@ -145,11 +255,11 @@ export async function POST(req: Request) {
 
     const [higherTF, highestTF] = getHigherTFs(timeframe);
 
-    const makeCall = (tf: string, role: "current" | "higher" | "highest") =>
+    const makeCall = (tf: string, role: "current" | "higher" | "highest", proCall = false) =>
       anthropic.messages.create({
         model:      "claude-opus-4-7",
-        max_tokens: 1500,
-        system:     buildSystemPrompt(tf, role),
+        max_tokens: proCall ? 3000 : role === "current" ? 2000 : 1200,
+        system:     buildSystemPrompt(tf, role, proCall),
         messages:   [{
           role:    "user",
           content: [
@@ -160,7 +270,7 @@ export async function POST(req: Request) {
       });
 
     const [r1, r2, r3] = await Promise.all([
-      makeCall(timeframe, "current"),
+      makeCall(timeframe, "current", isPro),
       makeCall(higherTF,  "higher"),
       makeCall(highestTF, "highest"),
     ]);

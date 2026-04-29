@@ -13,6 +13,7 @@ type AnalysisResult = {
   keyLevels:  { resistance: string[]; support: string[] };
   indicators: { rsi: string; macd: string; maCross: string };
   confluences: string[];
+  confluenceChecks?: { label: string; passed: boolean }[];
   warnings: string[];
   // Pro-only fields
   tradeScore?: string;
@@ -883,6 +884,108 @@ function FreeWatermark({ onUpgrade }: { onUpgrade: () => void }) {
         </button>
       </div>
     </motion.div>
+  );
+}
+
+// ── Avoid trade banner ─────────────────────────────────────────
+function AvoidBanner({ confidence, riskReward, warnings }: { confidence: number; riskReward: string; warnings: string[] }) {
+  const rr = parseFloat((riskReward ?? "").match(/1\s*:\s*([\d.]+)/)?.[1] ?? "0");
+  const lowRR      = rr > 0 && rr < 1.5;
+  const lowConf    = confidence < 45;
+  if (!lowRR && !lowConf) return null;
+
+  const reason = lowRR && lowConf
+    ? `Confidence is only ${confidence}% and R:R of 1:${rr.toFixed(1)} is below the 1:1.5 minimum.`
+    : lowConf
+    ? `Confidence is only ${confidence}% — fewer than 2 confluence factors align on this setup.`
+    : `Risk/Reward of 1:${rr.toFixed(1)} is below the 1:1.5 minimum required for a trade recommendation.`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+      transition={{ delay: 0.15, duration: 0.35 }}
+      className="rounded-2xl p-5 text-center"
+      style={{ background: "rgba(239,68,68,0.07)", border: "2px solid rgba(239,68,68,0.35)", boxShadow: "0 0 30px rgba(239,68,68,0.08)" }}>
+      <div className="flex items-center justify-center gap-2 mb-2">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="10" r="8.5" stroke="#ef4444" strokeWidth="1.5"/>
+          <path d="M7 7l6 6M13 7l-6 6" stroke="#ef4444" strokeWidth="1.8" strokeLinecap="round"/>
+        </svg>
+        <p className="font-bebas text-[22px] tracking-[0.08em] text-[#f87171]">AVOID THIS TRADE</p>
+      </div>
+      <p className="text-[#fca5a5] text-sm leading-relaxed mb-3">{reason}</p>
+      {warnings.length > 0 && (
+        <div className="space-y-1 text-left">
+          {warnings.map((w, i) => (
+            <p key={i} className="font-dm-mono text-[11px] text-[#f87171] flex items-start gap-1.5">
+              <span className="mt-0.5 flex-shrink-0">⚠</span>{w}
+            </p>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ── Confluence checklist ───────────────────────────────────────
+function ConfluerenceChecklist({ checks }: { checks: { label: string; passed: boolean }[] }) {
+  if (!checks || checks.length === 0) return null;
+  const passed = checks.filter((c) => c.passed).length;
+  return (
+    <motion.div
+      className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4"
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 1.0, duration: 0.4 }}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#6b7280] font-semibold">
+          Confluence Checklist
+        </p>
+        <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-full"
+          style={{
+            background: passed >= 4 ? "rgba(0,230,118,0.12)" : passed >= 3 ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.1)",
+            color:      passed >= 4 ? "#00e676"               : passed >= 3 ? "#f59e0b"               : "#f87171",
+            border:     `1px solid ${passed >= 4 ? "rgba(0,230,118,0.3)" : passed >= 3 ? "rgba(245,158,11,0.3)" : "rgba(239,68,68,0.25)"}`,
+          }}>
+          {passed}/{checks.length} aligned
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+        {checks.map((c, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="flex-shrink-0 text-[13px]">{c.passed ? "✅" : "❌"}</span>
+            <span className="font-dm-mono text-[11px]" style={{ color: c.passed ? "#d1d5db" : "#4b5563" }}>
+              {c.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+// ── 5-point structured summary ─────────────────────────────────
+function StructuredSummary({ text, isPro, startDelay = 0 }: { text: string; isPro: boolean; startDelay?: number }) {
+  const points = text.split("|").map((s) => s.trim()).filter(Boolean);
+  if (points.length < 2) {
+    return <WordFade text={text} startDelay={startDelay} />;
+  }
+  const labels = ["What", "Entry", "Invalidation", "Confirmation", "Risk"];
+  const colors = ["#d1d5db", "#4ade80", "#f87171", "#38bdf8", "#f59e0b"];
+  return (
+    <div className="space-y-2">
+      {points.map((pt, i) => (
+        <motion.div key={i}
+          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: startDelay + i * 0.12, duration: 0.3 }}
+          className="flex items-start gap-2.5">
+          <span className="font-dm-mono text-[9px] uppercase tracking-widest font-bold flex-shrink-0 mt-0.5 w-16 text-right"
+            style={{ color: colors[i] ?? "#6b7280" }}>
+            {labels[i] ?? `${i + 1}`}
+          </span>
+          <p className="text-[#d1d5db] text-sm leading-relaxed flex-1">{pt}</p>
+        </motion.div>
+      ))}
+    </div>
   );
 }
 
@@ -2022,6 +2125,14 @@ export default function App() {
                     return (
                       <div className="space-y-3 relative">
                         <ScanLine color={biasColor} />
+
+                        {/* Avoid banner — shown first if low quality setup */}
+                        <AvoidBanner
+                          confidence={a.confidence}
+                          riskReward={a.tradeSetup?.riskReward ?? ""}
+                          warnings={a.warnings ?? []}
+                        />
+
                         <motion.div className="rounded-2xl border p-4 flex items-center justify-between gap-4 relative overflow-hidden"
                           style={{ borderColor: `${biasColor}35`, background: `${biasColor}0d`,
                             boxShadow: isPro ? `0 0 20px ${biasColor}20` : undefined }}
@@ -2107,11 +2218,16 @@ export default function App() {
                             </div>
                           ))}
                         </motion.div>
+                        {/* Confluence checklist */}
+                        {a.confluenceChecks && a.confluenceChecks.length > 0 && (
+                          <ConfluerenceChecklist checks={a.confluenceChecks} />
+                        )}
+
                         <motion.div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4"
                           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 1.1, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
-                          <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">AI Summary</p>
-                          <WordFade text={a.summary} startDelay={1.22} />
+                          <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">AI Summary</p>
+                          <StructuredSummary text={a.summary} isPro={isPro} startDelay={1.22} />
                         </motion.div>
                         {a.confluences?.length > 0 && (
                           <motion.div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4"
