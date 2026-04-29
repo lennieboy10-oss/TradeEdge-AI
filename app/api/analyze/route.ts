@@ -81,7 +81,22 @@ export async function POST(request: Request) {
     // ── Single Claude call ────────────────────────────────────
     const response = await anthropic.messages.create({
       model:      "claude-opus-4-5",
-      max_tokens: 800,
+      max_tokens: 900,
+      system: `You are a professional trader specialising in price action and smart money concepts. Analyse charts carefully.
+
+Rules:
+- Only signal LONG or SHORT if there is genuine confluence of at least 2-3 factors
+- If chart is choppy, unclear or R:R is below 1:1.5 signal NEUTRAL
+- Place stop loss beyond nearest structural level
+- Place take profit at next significant level
+- Be specific with exact price levels visible on chart
+
+Grade the setup:
+A+ = perfect setup 85+ confidence
+A = strong setup 70-84 confidence
+B = decent setup 55-69 confidence
+C = weak setup 40-54 confidence
+D = avoid below 40 confidence`,
       messages: [{
         role:    "user",
         content: [
@@ -91,22 +106,8 @@ export async function POST(request: Request) {
           },
           {
             type: "text",
-            text: `Analyse this trading chart and return ONLY a valid JSON object with no markdown, no backticks, no explanation. Just raw JSON:
-{
-  "signal": "LONG or SHORT or NEUTRAL",
-  "entry": "price level",
-  "stopLoss": "price level",
-  "takeProfit": "price level",
-  "riskReward": "e.g. 1:2",
-  "confidence": 75,
-  "grade": "A",
-  "trend": "Bullish or Bearish or Ranging",
-  "keyLevels": "support and resistance levels",
-  "structure": "market structure description",
-  "confluenceFactors": ["factor 1", "factor 2", "factor 3"],
-  "warnings": ["warning if any"],
-  "summary": "3-4 sentence trade summary"
-}`,
+            text: `Timeframe: ${timeframe}. Return ONLY raw JSON no markdown no backticks:
+{"signal":"LONG or SHORT or NEUTRAL","entry":"price","stopLoss":"price","takeProfit":"price","riskReward":"1:2","confidence":75,"grade":"A","trend":"Bullish or Bearish or Ranging","keyLevels":"support and resistance","structure":"market structure","confluenceFactors":["factor 1","factor 2","factor 3"],"warnings":["warning if any"],"summary":"5 sentences: what chart shows. Why entry is valid or not. Exact invalidation level. Confirmation to wait for. Key risk."}`,
           },
         ],
       }],
@@ -203,7 +204,7 @@ export async function POST(request: Request) {
       const { data: jData, error: jError } = await getSupabase()
         .from("journal").insert(payload).select("id").single();
       if (jError) console.error("Journal insert error:", jError.code, jError.message);
-      else { journalId = jData?.id ?? null; console.log("Journal saved id:", journalId); }
+      else { journalId = jData?.id ?? null; console.log("Journal saved:", asset, signal); }
     } catch (e) { console.error("Journal exception:", e); }
 
     // ── Alerts (fire-and-forget) ───────────────────────────────
