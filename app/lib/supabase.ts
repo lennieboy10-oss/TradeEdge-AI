@@ -18,6 +18,8 @@ export type JournalEntry = {
   outcome: Outcome | null;
   notes: string | null;
   user_id: string | null;
+  entry_session: string | null;
+  entry_time_utc: string | null;
 };
 
 export type JournalInsert = Omit<JournalEntry, "id" | "created_at" | "outcome" | "notes">;
@@ -86,4 +88,31 @@ create table public.analyses (
 );
 alter table public.analyses enable row level security;
 create policy "allow_own" on public.analyses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- API Keys for MT EA and TradingView webhooks
+create table public.api_keys (
+  id         uuid        default gen_random_uuid() primary key,
+  user_id    text,
+  key_hash   text        not null unique,
+  created_at timestamptz default now() not null,
+  last_used  timestamptz,
+  is_active  boolean     default true
+);
+alter table public.api_keys enable row level security;
+create policy "allow_all" on public.api_keys for all using (true) with check (true);
+
+-- Automation settings for Elite users
+create table public.automation_settings (
+  id              uuid        default gen_random_uuid() primary key,
+  user_id         text        not null unique,
+  enabled         boolean     default false,
+  min_confidence  integer     default 85,
+  max_position    text        default '100',
+  daily_limit     integer     default 3,
+  sessions        text[]      default array['london','ny'],
+  pairs           text        default 'XAUUSD, EURUSD, GBPUSD',
+  updated_at      timestamptz default now()
+);
+alter table public.automation_settings enable row level security;
+create policy "allow_all" on public.automation_settings for all using (true) with check (true);
 */

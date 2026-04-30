@@ -6,16 +6,20 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2024-11
 
 export async function POST(req: Request) {
   try {
-    const { clientId, email } = await req.json();
+    const { clientId, email, annual } = await req.json();
+
+    // Use annual or monthly price ID, falling back to legacy STRIPE_PRICE_ID
+    const priceId = annual
+      ? (process.env.STRIPE_PRO_ANNUAL_PRICE_ID  ?? process.env.STRIPE_PRICE_ID!)
+      : (process.env.STRIPE_PRO_MONTHLY_PRICE_ID ?? process.env.STRIPE_PRICE_ID!);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "subscription",
-      line_items: [{ price: process.env.STRIPE_PRICE_ID!, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       customer_email: email || undefined,
       client_reference_id: clientId || undefined,
       metadata: { user_id: clientId || "" },
-      // Store client_id on the subscription so invoice.paid can read it
       subscription_data: {
         metadata: { client_id: clientId || "" },
       },

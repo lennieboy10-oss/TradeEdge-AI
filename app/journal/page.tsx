@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { JournalEntry, Outcome } from "@/app/lib/supabase";
+import { AuthNavButtons } from "@/app/providers";
+import { useUserPlan } from "@/app/lib/plan-context";
+import { ProLockedPage } from "@/app/components/ProLockedPage";
 
 // ── Shared pieces ─────────────────────────────────────────────
 function LogoMark() {
@@ -49,7 +52,26 @@ function calcStats(entries: JournalEntry[]) {
     ? Object.entries(assetWins).sort((a, b) => b[1] - a[1])[0][0]
     : null;
 
-  return { total, winRate, avgRR, bestAsset };
+  // Best session by win rate (requires ≥2 decided trades in that session)
+  const sessionWins: Record<string, number>  = {};
+  const sessionTotal: Record<string, number> = {};
+  entries
+    .filter((e) => (e.outcome === "WIN" || e.outcome === "LOSS") && e.entry_session)
+    .forEach((e) => {
+      const s = e.entry_session!;
+      sessionTotal[s] = (sessionTotal[s] || 0) + 1;
+      if (e.outcome === "WIN") sessionWins[s] = (sessionWins[s] || 0) + 1;
+    });
+  let bestSession: string | null = null;
+  let bestSessionRate = 0;
+  for (const [s, tot] of Object.entries(sessionTotal)) {
+    if (tot >= 2) {
+      const rate = (sessionWins[s] || 0) / tot;
+      if (rate > bestSessionRate) { bestSessionRate = rate; bestSession = s; }
+    }
+  }
+
+  return { total, winRate, avgRR, bestAsset, bestSession, bestSessionRate };
 }
 
 function formatDateTime(iso: string) {
@@ -81,7 +103,7 @@ function ConfBadge({ confidence }: { confidence: number | null }) {
   if (confidence == null) return <span className="text-[#4b5563] text-xs font-dm-mono">—</span>;
   const color =
     confidence >= 75 ? "#4ade80" :
-    confidence >= 50 ? "#fbbf24" : "#f87171";
+    confidence >= 50 ? "#9ca3af" : "#f87171";
   return (
     <span className="font-dm-mono text-xs font-bold tabular-nums" style={{ color }}>{confidence}%</span>
   );
@@ -90,7 +112,7 @@ function ConfBadge({ confidence }: { confidence: number | null }) {
 function outcomeColor(outcome: Outcome | null | undefined) {
   if (outcome === "WIN")       return "#4ade80";
   if (outcome === "LOSS")      return "#f87171";
-  if (outcome === "BREAKEVEN") return "#fbbf24";
+  if (outcome === "BREAKEVEN") return "#9ca3af";
   return "#4b5563";
 }
 
@@ -98,8 +120,168 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
   return (
     <div className="px-6 py-5 rounded-2xl border border-white/[0.07] bg-white/[0.025] flex flex-col gap-1">
       <p className="text-[#6b7280] text-[11px] font-semibold uppercase tracking-[0.13em]">{label}</p>
-      <p className="text-[32px] font-extrabold text-[#f5c518] leading-none">{value}</p>
+      <p className="text-[32px] font-extrabold text-[#00e676] leading-none">{value}</p>
       {sub && <p className="text-[#4b5563] text-xs mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+// ── Coaching score gauge ──────────────────────────────────────
+function CoachingScoreGauge({ score }: { score: number }) {
+  const radius = 52;
+  const stroke = 7;
+  const normalizedRadius = radius - stroke / 2;
+  const circumference = normalizedRadius * 2 * Math.PI;
+  // Arc covers 270 degrees (from 135deg to 405deg)
+  const arcLength = circumference * 0.75;
+  const fillLength = arcLength * Math.min(1, Math.max(0, score / 100));
+  const gapLength  = arcLength - fillLength;
+
+  const scoreColor = score >= 75 ? "#00e676" : score >= 50 ? "#9ca3af" : "#f87171";
+
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: radius * 2, height: radius * 2 }}>
+      <svg width={radius * 2} height={radius * 2} style={{ transform: "rotate(135deg)" }}>
+        {/* Track */}
+        <circle
+          cx={radius} cy={radius} r={normalizedRadius}
+          fill="none"
+          stroke="rgba(255,255,255,0.06)"
+          strokeWidth={stroke}
+          strokeDasharray={`${arcLength} ${circumference - arcLength}`}
+          strokeLinecap="round"
+        />
+        {/* Fill */}
+        <circle
+          cx={radius} cy={radius} r={normalizedRadius}
+          fill="none"
+          stroke={scoreColor}
+          strokeWidth={stroke}
+          strokeDasharray={`${fillLength} ${gapLength + (circumference - arcLength)}`}
+          strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 6px ${scoreColor}88)` }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="font-bebas text-[38px] leading-none" style={{ color: scoreColor }}>{score}</span>
+        <span className="font-dm-mono text-[9px] text-[#6b7280] uppercase tracking-widest mt-0.5">Score</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Coaching report ───────────────────────────────────────────
+interface CoachingData {
+  strongestAsset: string | null;
+  weakestAsset:   string | null;
+  bestTimeframe:  string | null;
+  worstTimeframe: string | null;
+  bestSession:    string | null;
+  worstSession:   string | null;
+  winnerAvgR:     string | null;
+  loserAvgR:      string | null;
+  keyPatterns:    string[];
+  improvements:   string[];
+  overallAssessment: string;
+  coachingScore:  number;
+}
+
+function CoachingReport({ data, onClose }: { data: CoachingData; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(8,10,16,0.92)", backdropFilter: "blur(12px)" }}>
+      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-white/[0.1]"
+        style={{ background: "linear-gradient(135deg, #0d1117 0%, #080a10 100%)" }}>
+
+        {/* Close */}
+        <button onClick={onClose}
+          className="absolute top-5 right-5 w-8 h-8 rounded-xl flex items-center justify-center text-[#4b5563] hover:text-white hover:bg-white/[0.08] transition-all z-10">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+
+        <div className="p-8">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#00e676]/30 bg-[#00e676]/10 text-[#00e676] text-[10px] font-semibold tracking-[0.14em] uppercase">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00e676] animate-pulse" />
+              AI Trade Coach
+            </div>
+          </div>
+          <h2 className="text-[28px] font-extrabold text-white mb-1 leading-tight">Your Coaching Report</h2>
+          <p className="text-[#4b5563] text-sm mb-8">Based on your full trade history</p>
+
+          {/* Score + overall */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 mb-8 p-6 rounded-2xl border border-white/[0.07]"
+            style={{ background: "rgba(255,255,255,0.02)" }}>
+            <CoachingScoreGauge score={data.coachingScore} />
+            <div className="flex-1">
+              <p className="font-dm-mono text-[10px] text-[#6b7280] uppercase tracking-[0.14em] mb-2">Coach's Assessment</p>
+              <p className="text-[#d1d5db] text-sm leading-relaxed">{data.overallAssessment}</p>
+            </div>
+          </div>
+
+          {/* Strengths / Weaknesses grid */}
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            {[
+              { label: "Strongest Asset", value: data.strongestAsset, good: true },
+              { label: "Weakest Asset",   value: data.weakestAsset,   good: false },
+              { label: "Best Timeframe",  value: data.bestTimeframe,  good: true },
+              { label: "Worst Timeframe", value: data.worstTimeframe, good: false },
+              { label: "Best Session",    value: data.bestSession,    good: true },
+              { label: "Worst Session",   value: data.worstSession,   good: false },
+              { label: "Avg Winner R",    value: data.winnerAvgR ? `1:${data.winnerAvgR}` : null, good: true },
+              { label: "Avg Loser R",     value: data.loserAvgR  ? `1:${data.loserAvgR}`  : null, good: false },
+            ].map(({ label, value, good }) => (
+              <div key={label} className="px-4 py-3 rounded-xl border"
+                style={{
+                  background: good ? "rgba(74,222,128,0.04)" : "rgba(248,113,113,0.04)",
+                  borderColor: good ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)",
+                }}>
+                <p className="font-dm-mono text-[9px] uppercase tracking-[0.14em] mb-1"
+                  style={{ color: good ? "#4ade80" : "#f87171" }}>{label}</p>
+                <p className="text-white font-semibold text-sm">{value ?? "—"}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Key patterns */}
+          {data.keyPatterns?.length > 0 && (
+            <div className="mb-6">
+              <p className="font-dm-mono text-[10px] uppercase tracking-[0.14em] text-[#6b7280] mb-3">Key Patterns Identified</p>
+              <div className="space-y-2">
+                {data.keyPatterns.map((p, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl border border-white/[0.06]"
+                    style={{ background: "rgba(255,255,255,0.02)" }}>
+                    <span className="font-bebas text-[#00e676] text-lg leading-none mt-0.5">{i + 1}</span>
+                    <p className="text-[#d1d5db] text-sm leading-relaxed">{p}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Improvements */}
+          {data.improvements?.length > 0 && (
+            <div>
+              <p className="font-dm-mono text-[10px] uppercase tracking-[0.14em] text-[#6b7280] mb-3">Action Plan</p>
+              <div className="space-y-2">
+                {data.improvements.map((imp, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl border border-[#00e676]/[0.1]"
+                    style={{ background: "rgba(0,230,118,0.03)" }}>
+                    <div className="w-5 h-5 rounded-full border border-[#00e676]/40 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+                        <path d="M1 3l2 2 4-4" stroke="#00e676" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                    <p className="text-[#d1d5db] text-sm leading-relaxed">{imp}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -218,7 +400,7 @@ function JournalRow({ entry, onUpdate, onDelete }: {
             )}
             {entry.confidence != null && (
               <span className="px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06] text-xs text-[#6b7280]">
-                Confidence <span className="font-dm-mono ml-1" style={{ color: entry.confidence >= 75 ? "#4ade80" : entry.confidence >= 50 ? "#fbbf24" : "#f87171" }}>{entry.confidence}%</span>
+                Confidence <span className="font-dm-mono ml-1" style={{ color: entry.confidence >= 75 ? "#4ade80" : entry.confidence >= 50 ? "#9ca3af" : "#f87171" }}>{entry.confidence}%</span>
               </span>
             )}
           </div>
@@ -249,31 +431,47 @@ function JournalRow({ entry, onUpdate, onDelete }: {
   );
 }
 
+// ── Lock icon ─────────────────────────────────────────────────
+function JournalLockIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <rect x="5" y="14" width="22" height="16" rx="3.5" stroke="#00e676" strokeWidth="1.6"/>
+      <path d="M10 14V10a6 6 0 0112 0v4" stroke="#00e676" strokeWidth="1.6" strokeLinecap="round"/>
+      <circle cx="16" cy="22" r="2" fill="#00e676"/>
+      <path d="M16 24v2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────
 export default function JournalPage() {
-  const [entries,  setEntries]  = useState<JournalEntry[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [setupErr, setSetupErr] = useState(false);
-  const [clientId, setClientId] = useState<string | null>(null);
-  const [isPro,    setIsPro]    = useState(false);
+  const { isPro } = useUserPlan();
+  const [entries,         setEntries]         = useState<JournalEntry[]>([]);
+  const [loading,         setLoading]         = useState(true);
+  const [setupErr,        setSetupErr]        = useState(false);
+  const [clientId,        setClientId]        = useState<string | null>(null);
+  const [coachingData,    setCoachingData]    = useState<CoachingData | null>(null);
+  const [coachingLoading, setCoachingLoading] = useState(false);
+  const [coachingError,   setCoachingError]   = useState<string | null>(null);
+  const [showCoaching,    setShowCoaching]    = useState(false);
 
   useEffect(() => {
     const id = localStorage.getItem("ciq_client_id");
     setClientId(id);
+    if (!isPro) return;
     const url = `/api/journal${id ? `?client_id=${encodeURIComponent(id)}` : ""}`;
     fetch(url)
       .then((r) => r.json())
       .then((d) => {
         if (d.success) {
           setEntries(d.entries ?? []);
-          setIsPro(d.isPro ?? false);
         } else {
           setSetupErr(true);
         }
       })
       .catch(() => setSetupErr(true))
       .finally(() => setLoading(false));
-  }, []);
+  }, [isPro]);
 
   function handleUpdate(id: string, patch: Partial<JournalEntry>) {
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
@@ -283,21 +481,40 @@ export default function JournalPage() {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }
 
-  function handleUpgrade() {
+  async function handleGetCoaching() {
     if (!clientId) return;
-    fetch("/api/stripe/checkout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId }),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (d.url) window.location.href = d.url; });
+    setCoachingLoading(true);
+    setCoachingError(null);
+    try {
+      const res  = await fetch("/api/coaching", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setCoachingError(data.error ?? "Failed to generate coaching report");
+      } else {
+        setCoachingData(data.coaching as CoachingData);
+        setShowCoaching(true);
+      }
+    } catch {
+      setCoachingError("Network error — please try again");
+    } finally {
+      setCoachingLoading(false);
+    }
   }
 
   const stats = calcStats(entries);
+  const canCoach = entries.length >= 10;
 
   return (
-    <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden">
+    <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden flex flex-col">
+
+      {/* ── Coaching modal ── */}
+      {showCoaching && coachingData && (
+        <CoachingReport data={coachingData} onClose={() => setShowCoaching(false)} />
+      )}
 
       {/* ── NAV ── */}
       <nav className="fixed top-0 left-0 right-0 z-50 nav-glass">
@@ -305,56 +522,135 @@ export default function JournalPage() {
           <Link href="/" className="flex items-center gap-2.5">
             <LogoMark />
             <span className="font-bold text-[17px] text-white">
-              ChartIQ <span className="text-[#f5c518]">AI</span>
+              ChartIQ <span className="text-[#00e676]">AI</span>
             </span>
           </Link>
           <div className="hidden md:flex items-center gap-7">
             <Link href="/watchlist"   className="text-sm text-[#6b7280] hover:text-white transition-colors">Watchlist</Link>
             <Link href="/calculator"  className="text-sm text-[#6b7280] hover:text-white transition-colors">Calculator</Link>
             <Link href="/calendar"    className="text-sm text-[#6b7280] hover:text-white transition-colors">Calendar</Link>
-            <Link href="/journal"     className="text-sm font-semibold text-[#f5c518]">Journal</Link>
+            <Link href="/journal"     className="text-sm font-semibold text-[#00e676]">Journal</Link>
           </div>
           <Link href="/#analyze" className="btn-yellow px-5 py-2 text-sm hidden md:inline-flex">
             ⚡ Analyze Chart
           </Link>
+          <AuthNavButtons className="hidden md:flex" />
         </div>
       </nav>
 
+      {/* ── Locked for free users ── */}
+      {!isPro ? (
+        <ProLockedPage
+          icon={<JournalLockIcon />}
+          heading="TRACK YOUR EDGE"
+          subtext="Your complete trade history, win rate, and performance insights — Pro only"
+          features={[
+            "Auto-save every analysis",
+            "Win rate tracking",
+            "Best performing assets",
+            "Notes and outcome tracking",
+          ]}
+          ctaLabel="Unlock journal — £19/mo"
+          clientId={clientId}
+        />
+      ) : (
       <div className="max-w-6xl mx-auto px-6 pt-32 pb-20">
 
         {/* ── Header ── */}
-        <div className="mb-12">
-          <SectionBadge>
-            <span className="w-2 h-2 rounded-full bg-[#00e676] animate-pulse-dot" />
-            Trade Journal
-          </SectionBadge>
-          <h1 className="text-[clamp(38px,6vw,60px)] font-extrabold leading-[1.08] tracking-tight mb-3">
-            Your Trading <span className="text-[#f5c518]">History</span>
-          </h1>
-          <p className="text-[#6b7280] text-lg max-w-lg leading-relaxed">
-            Every chart analysis is automatically logged. Track outcomes, review setups, and sharpen your edge.
-          </p>
+        <div className="mb-12 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
+          <div>
+            <SectionBadge>
+              <span className="w-2 h-2 rounded-full bg-[#00e676] animate-pulse-dot" />
+              Trade Journal
+            </SectionBadge>
+            <h1 className="text-[clamp(38px,6vw,60px)] font-extrabold leading-[1.08] tracking-tight mb-3">
+              Your Trading <span className="text-[#00e676]">History</span>
+            </h1>
+            <p className="text-[#6b7280] text-lg max-w-lg leading-relaxed">
+              Every chart analysis is automatically logged. Track outcomes, review setups, and sharpen your edge.
+            </p>
+          </div>
+
+          {/* ── Get Coaching button ── */}
+          {!loading && (
+            <div className="flex-shrink-0">
+              {canCoach ? (
+                <div className="flex flex-col items-end gap-2">
+                  <button
+                    onClick={handleGetCoaching}
+                    disabled={coachingLoading}
+                    className="flex items-center gap-2.5 px-5 py-3 rounded-xl font-bold text-sm transition-all hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed"
+                    style={{
+                      background: coachingLoading ? "rgba(0,230,118,0.15)" : "#00e676",
+                      color: coachingLoading ? "#00e676" : "#080a10",
+                      boxShadow: "0 0 22px rgba(0,230,118,0.3)",
+                    }}>
+                    {coachingLoading ? (
+                      <>
+                        <svg className="animate-spin" width="15" height="15" viewBox="0 0 15 15" fill="none">
+                          <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="10" strokeLinecap="round" />
+                        </svg>
+                        Analysing your trades…
+                      </>
+                    ) : (
+                      <>
+                        <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                          <path d="M7.5 1.5c-3.314 0-6 2.686-6 6s2.686 6 6 6 6-2.686 6-6-2.686-6-6-6z" stroke="currentColor" strokeWidth="1.3"/>
+                          <path d="M5 7.5l1.8 1.8 3.2-3.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        Get AI Coaching
+                      </>
+                    )}
+                  </button>
+                  {coachingData && (
+                    <button onClick={() => setShowCoaching(true)}
+                      className="font-dm-mono text-[10px] text-[#00e676] hover:underline">
+                      View last report
+                    </button>
+                  )}
+                  {coachingError && (
+                    <p className="font-dm-mono text-[10px] text-[#f87171]">{coachingError}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-end gap-1 px-4 py-3 rounded-xl border border-white/[0.06]"
+                  style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <div className="flex items-center gap-2">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                      <rect x="1.5" y="5.5" width="10" height="7" rx="1.5" stroke="#4b5563" strokeWidth="1.2"/>
+                      <path d="M4 5.5V4a2.5 2.5 0 015 0v1.5" stroke="#4b5563" strokeWidth="1.2" strokeLinecap="round"/>
+                    </svg>
+                    <span className="font-dm-mono text-[10px] text-[#4b5563]">AI Coaching unlocks at 10 trades</span>
+                  </div>
+                  <div className="w-full h-[3px] rounded-full overflow-hidden mt-1" style={{ background: "rgba(255,255,255,0.06)" }}>
+                    <div style={{ width: `${Math.min(100, (entries.length / 10) * 100)}%`, background: "#00e676", height: "100%", borderRadius: "9999px" }} />
+                  </div>
+                  <span className="font-dm-mono text-[9px] text-[#374151]">{entries.length}/10 trades logged</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Supabase error ── */}
         {setupErr && (
-          <div className="mb-8 rounded-2xl border border-[#fbbf24]/20 bg-[#fbbf24]/[0.04] p-5 flex items-start gap-4">
-            <div className="w-8 h-8 rounded-xl bg-[#fbbf24]/10 flex items-center justify-center flex-shrink-0 text-base">⚠</div>
+          <div className="mb-8 rounded-2xl border border-[#9ca3af]/20 bg-[#9ca3af]/[0.04] p-5 flex items-start gap-4">
+            <div className="w-8 h-8 rounded-xl bg-[#9ca3af]/10 flex items-center justify-center flex-shrink-0 text-base">⚠</div>
             <div>
-              <p className="text-[#fbbf24] font-semibold text-sm mb-1">Supabase not configured</p>
-              <p className="text-[#fbbf24]/60 text-sm leading-relaxed">
+              <p className="text-[#9ca3af] font-semibold text-sm mb-1">Supabase not configured</p>
+              <p className="text-[#9ca3af]/60 text-sm leading-relaxed">
                 Add{" "}
-                <code className="font-dm-mono bg-[#fbbf24]/10 px-1.5 py-0.5 rounded text-[#fbbf24]">SUPABASE_URL</code>{" "}
+                <code className="font-dm-mono bg-[#9ca3af]/10 px-1.5 py-0.5 rounded text-[#9ca3af]">SUPABASE_URL</code>{" "}
                 and{" "}
-                <code className="font-dm-mono bg-[#fbbf24]/10 px-1.5 py-0.5 rounded text-[#fbbf24]">SUPABASE_SERVICE_KEY</code>{" "}
-                to <code className="font-dm-mono bg-[#fbbf24]/10 px-1.5 py-0.5 rounded text-[#fbbf24]">.env.local</code> and restart.
+                <code className="font-dm-mono bg-[#9ca3af]/10 px-1.5 py-0.5 rounded text-[#9ca3af]">SUPABASE_SERVICE_KEY</code>{" "}
+                to <code className="font-dm-mono bg-[#9ca3af]/10 px-1.5 py-0.5 rounded text-[#9ca3af]">.env.local</code> and restart.
               </p>
             </div>
           </div>
         )}
 
         {/* ── Stats bar ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-10">
           <StatCard label="Total Analyses" value={String(stats.total)} sub="all time" />
           <StatCard
             label="Win Rate"
@@ -368,23 +664,11 @@ export default function JournalPage() {
             label="Best Asset"
             value={stats.bestAsset ?? "—"}
             sub={stats.bestAsset ? "most winning trades" : "mark trades as WIN to track"} />
+          <StatCard
+            label="Best Session"
+            value={stats.bestSession ?? "—"}
+            sub={stats.bestSession ? `${Math.round(stats.bestSessionRate * 100)}% win rate` : "needs session data"} />
         </div>
-
-        {/* ── Free tier notice ── */}
-        {!isPro && !loading && entries.length >= 10 && (
-          <div className="mb-6 rounded-xl border border-[#00e676]/20 bg-[#00e676]/[0.04] px-5 py-4 flex items-center justify-between gap-4">
-            <p className="text-[#6b7280] text-sm">
-              Showing your last 10 entries.{" "}
-              <span className="text-white">Upgrade to Pro for full unlimited history.</span>
-            </p>
-            <button
-              onClick={handleUpgrade}
-              className="flex-shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-all hover:-translate-y-0.5"
-              style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 14px rgba(0,230,118,0.25)" }}>
-              Upgrade to Pro
-            </button>
-          </div>
-        )}
 
         {/* ── Column headers ── */}
         {!loading && entries.length > 0 && (
@@ -439,6 +723,7 @@ export default function JournalPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

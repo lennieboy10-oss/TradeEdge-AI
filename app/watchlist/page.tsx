@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { AuthNavButtons } from "@/app/providers";
+import { useUserPlan } from "@/app/lib/plan-context";
+import { ProLockedPage } from "@/app/components/ProLockedPage";
 
 // ── Types ──────────────────────────────────────────────────────
 type WatchlistItem = {
@@ -72,9 +75,9 @@ function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
 
 function SignalBadge({ signal }: { signal: string | null }) {
   if (!signal) return null;
-  const color  = signal === "LONG" ? "#00e676" : signal === "SHORT" ? "#f87171" : "#f59e0b";
-  const bg     = signal === "LONG" ? "rgba(0,230,118,0.12)" : signal === "SHORT" ? "rgba(248,113,113,0.12)" : "rgba(245,158,11,0.12)";
-  const border = signal === "LONG" ? "rgba(0,230,118,0.3)" : signal === "SHORT" ? "rgba(248,113,113,0.3)" : "rgba(245,158,11,0.3)";
+  const color  = signal === "LONG" ? "#00e676" : signal === "SHORT" ? "#f87171" : "#9ca3af";
+  const bg     = signal === "LONG" ? "rgba(0,230,118,0.12)" : signal === "SHORT" ? "rgba(248,113,113,0.12)" : "rgba(156,163,175,0.1)";
+  const border = signal === "LONG" ? "rgba(0,230,118,0.3)" : signal === "SHORT" ? "rgba(248,113,113,0.3)" : "rgba(156,163,175,0.25)";
   return (
     <span className="font-dm-mono text-[11px] font-bold px-2.5 py-1 rounded-full"
       style={{ color, background: bg, border: `1px solid ${border}` }}>
@@ -146,9 +149,9 @@ function AlertPanel({
               <button key={s} onClick={() => onChange("alert_signal", draft.alert_signal === s ? "" : s)}
                 className="text-xs px-3 py-1.5 rounded-lg border font-dm-mono font-semibold transition-all duration-150"
                 style={draft.alert_signal === s
-                  ? { background: s === "LONG" ? "rgba(0,230,118,0.2)" : s === "SHORT" ? "rgba(248,113,113,0.2)" : "rgba(245,158,11,0.2)",
-                      borderColor: s === "LONG" ? "#00e676" : s === "SHORT" ? "#f87171" : "#f59e0b",
-                      color: s === "LONG" ? "#00e676" : s === "SHORT" ? "#f87171" : "#f59e0b" }
+                  ? { background: s === "LONG" ? "rgba(0,230,118,0.2)" : s === "SHORT" ? "rgba(248,113,113,0.2)" : "rgba(156,163,175,0.12)",
+                      borderColor: s === "LONG" ? "#00e676" : s === "SHORT" ? "#f87171" : "#9ca3af",
+                      color: s === "LONG" ? "#00e676" : s === "SHORT" ? "#f87171" : "#9ca3af" }
                   : { background: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.09)", color: "#6b7280" }}>
                 {s}
               </button>
@@ -226,7 +229,7 @@ function WatchlistCard({
   });
 
   const confColor = journal?.confidence
-    ? journal.confidence >= 75 ? "#00e676" : journal.confidence >= 50 ? "#f59e0b" : "#f87171"
+    ? journal.confidence >= 75 ? "#00e676" : journal.confidence >= 50 ? "#9ca3af" : "#f87171"
     : "#4b5563";
 
   return (
@@ -291,11 +294,18 @@ function WatchlistCard({
         {/* Alerts toggle */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {!isPro && (
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <title>Pro feature</title>
-              <rect x="1.5" y="5.5" width="9" height="6" rx="1.5" stroke="#4b5563" strokeWidth="1.2"/>
-              <path d="M3.5 5.5V3.8a2.5 2.5 0 015 0V5.5" stroke="#4b5563" strokeWidth="1.2" strokeLinecap="round"/>
-            </svg>
+            <div className="relative group">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <rect x="1.5" y="5.5" width="9" height="6" rx="1.5" stroke="#4b5563" strokeWidth="1.2"/>
+                <path d="M3.5 5.5V3.8a2.5 2.5 0 015 0V5.5" stroke="#4b5563" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg text-[10px] font-dm-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10"
+                style={{ background: "#1a1f2e", border: "1px solid rgba(255,255,255,0.1)", color: "#9ca3af" }}>
+                Pro feature — upgrade to enable alerts
+                <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0"
+                  style={{ borderLeft: "4px solid transparent", borderRight: "4px solid transparent", borderTop: "4px solid #1a1f2e" }} />
+              </div>
+            </div>
           )}
           <span className="text-[#6b7280] text-xs">Alerts</span>
           <Toggle
@@ -336,8 +346,20 @@ function WatchlistCard({
   );
 }
 
+// ── Lock icon ─────────────────────────────────────────────────
+function WatchlistLockIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <rect x="5" y="14" width="22" height="16" rx="3.5" stroke="#00e676" strokeWidth="1.6"/>
+      <path d="M10 14V10a6 6 0 0112 0v4" stroke="#00e676" strokeWidth="1.6" strokeLinecap="round"/>
+      <path d="M10 20h12M10 25h7" stroke="#00e676" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────
 export default function WatchlistPage() {
+  const { isPro: isProUser } = useUserPlan();
   const [items, setItems]               = useState<WatchlistItem[]>([]);
   const [journalMap, setJournalMap]     = useState<Record<string, JournalSnap>>({});
   const [loading, setLoading]           = useState(true);
@@ -465,7 +487,7 @@ export default function WatchlistPage() {
         <div className="flex items-center justify-between px-6 h-16 border-b border-white/[0.06]">
           <div className="flex items-center gap-2.5">
             <LogoMark />
-            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#00e676]">AI</span></span>
           </div>
           <button onClick={() => setMobileOpen(false)} className="w-9 h-9 rounded-lg bg-white/[0.06] flex items-center justify-center">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
@@ -488,7 +510,7 @@ export default function WatchlistPage() {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5">
             <LogoMark />
-            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
           </Link>
           <div className="hidden md:flex items-center gap-7">
             {navLinks.map((l) => {
@@ -507,6 +529,7 @@ export default function WatchlistPage() {
               <span className="hidden md:inline-flex font-dm-mono text-[10px] font-bold tracking-widest px-2.5 py-1 rounded-full"
                 style={{ background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.25)" }}>PRO</span>
             )}
+            <AuthNavButtons className="hidden md:flex" />
             <button onClick={() => setMobileOpen(true)}
               className="md:hidden w-9 h-9 rounded-lg bg-white/[0.06] flex flex-col items-center justify-center gap-1.5">
               <span className="block rounded-full" style={{ width: "18px", height: "2px", background: "white" }} />
@@ -517,7 +540,23 @@ export default function WatchlistPage() {
         </div>
       </nav>
 
-      {/* Content */}
+      {/* ── Locked for free users ── */}
+      {!isProUser ? (
+        <ProLockedPage
+          icon={<WatchlistLockIcon />}
+          heading="NEVER MISS A SETUP"
+          subtext="Save your favourite pairs and get email alerts when signals fire — Pro only"
+          features={[
+            "Save unlimited pairs",
+            "Email alerts on signal changes",
+            "Last signal per pair at a glance",
+            "One click analyse from watchlist",
+          ]}
+          ctaLabel="Unlock watchlist — £19/mo"
+          clientId={clientId}
+        />
+      ) : (
+      <>{/* Content */}
       <div className="max-w-3xl mx-auto px-6 pt-28 pb-24">
 
         {/* Header */}
@@ -635,10 +674,11 @@ export default function WatchlistPage() {
       <footer className="py-10 px-6 border-t border-white/[0.05] text-center">
         <Link href="/" className="inline-flex items-center gap-2.5 opacity-40 hover:opacity-70 transition-opacity">
           <LogoMark />
-          <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+          <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
         </Link>
       </footer>
-
+      </>
+      )}
     </div>
   );
 }

@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useUserPlan } from "@/app/lib/plan-context";
+import { AuthNavButtons } from "@/app/providers";
+import { ProLockedPage } from "@/app/components/ProLockedPage";
 
 type CalEvent = {
   title: string;
@@ -113,7 +116,7 @@ function EventRow({ event }: { event: CalEvent }) {
             <span className="text-sm text-white font-medium">{event.title}</span>
             {isImminent && (
               <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-full"
-                style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.3)" }}>
+                style={{ background: "rgba(245,158,11,0.15)", color: "#9ca3af", border: "1px solid rgba(245,158,11,0.3)" }}>
                 {min! <= 0 ? "NOW" : `in ${min! < 60 ? `${min}m` : `${Math.floor(min! / 60)}h`}`}
               </span>
             )}
@@ -142,13 +145,25 @@ function EventRow({ event }: { event: CalEvent }) {
 type ImpactFilter  = "All" | "High" | "Medium" | "Low";
 type CurrencyFilter = "All" | "USD" | "EUR" | "GBP" | "JPY" | "AUD" | "CAD" | "CHF";
 
+function CalendarLockIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <rect x="4" y="6" width="24" height="22" rx="3" stroke="#00e676" strokeWidth="1.6"/>
+      <path d="M10 4v4M22 4v4M4 14h24" stroke="#00e676" strokeWidth="1.6" strokeLinecap="round"/>
+      <rect x="12" y="18" width="8" height="7" rx="1.5" stroke="#00e676" strokeWidth="1.3"/>
+    </svg>
+  );
+}
+
 export default function CalendarPage() {
+  const { isPro: isProUser } = useUserPlan();
   const [events, setEvents]         = useState<CalEvent[]>([]);
   const [loading, setLoading]       = useState(true);
   const [lastRefresh, setLastRefresh] = useState(0);
   const [impact, setImpact]         = useState<ImpactFilter>("High");
   const [currency, setCurrency]     = useState<CurrencyFilter>("All");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [clientId, setClientId]     = useState<string | null>(null);
   const [plan, setPlan]             = useState("free");
 
   const fetchEvents = useCallback(async () => {
@@ -164,6 +179,7 @@ export default function CalendarPage() {
   useEffect(() => {
     let id = localStorage.getItem("ciq_client_id");
     if (!id) { id = crypto.randomUUID(); localStorage.setItem("ciq_client_id", id); }
+    setClientId(id);
     setPlan(localStorage.getItem("ciq_plan") ?? "free");
     fetchEvents();
     // Auto-refresh every 30 minutes
@@ -199,7 +215,7 @@ export default function CalendarPage() {
         <div className="flex items-center justify-between px-6 h-16 border-b border-white/[0.06]">
           <div className="flex items-center gap-2.5">
             <LogoMark />
-            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#00e676]">AI</span></span>
           </div>
           <button onClick={() => setMobileOpen(false)} className="w-9 h-9 rounded-lg bg-white/[0.06] flex items-center justify-center">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
@@ -221,7 +237,7 @@ export default function CalendarPage() {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5">
             <LogoMark />
-            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
           </Link>
           <div className="hidden md:flex items-center gap-7">
             {navLinks.map((l) => {
@@ -237,6 +253,7 @@ export default function CalendarPage() {
               <span className="hidden md:inline-flex font-dm-mono text-[10px] font-bold tracking-widest px-2.5 py-1 rounded-full"
                 style={{ background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.25)" }}>PRO</span>
             )}
+            <AuthNavButtons className="hidden md:flex" />
             <button onClick={() => setMobileOpen(true)}
               className="md:hidden w-9 h-9 rounded-lg bg-white/[0.06] flex flex-col items-center justify-center gap-1.5">
               <span className="block rounded-full" style={{ width: "18px", height: "2px", background: "white" }} />
@@ -247,7 +264,23 @@ export default function CalendarPage() {
         </div>
       </nav>
 
-      {/* Content */}
+      {/* ── Locked for free users ── */}
+      {!isProUser ? (
+        <ProLockedPage
+          icon={<CalendarLockIcon />}
+          heading="TRADE AROUND THE NEWS"
+          subtext="Never trade into high impact news blindly — see upcoming events before you analyse — Pro only"
+          features={[
+            "Full week economic calendar",
+            "High impact event warnings on analyses",
+            "Currency filter",
+            "Auto refresh every 30 minutes",
+          ]}
+          ctaLabel="Unlock calendar — £19/mo"
+          clientId={clientId}
+        />
+      ) : (
+      <>{/* Content */}
       <div className="max-w-6xl mx-auto px-4 md:px-6 pt-28 pb-24">
 
         {/* Header */}
@@ -393,10 +426,12 @@ export default function CalendarPage() {
       <footer className="py-10 px-6 border-t border-white/[0.05] text-center">
         <Link href="/" className="inline-flex items-center gap-2.5 opacity-40 hover:opacity-70 transition-opacity">
           <LogoMark />
-          <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+          <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
         </Link>
         <p className="font-dm-mono text-[11px] text-[#374151] mt-3">All times in UTC · Data from ForexFactory via faireconomy.media</p>
       </footer>
+      </>
+      )}
     </div>
   );
 }

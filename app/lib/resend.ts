@@ -42,7 +42,7 @@ export async function sendAlertEmail(params: AlertEmailParams) {
       <div style="width:32px;height:32px;border-radius:50%;background:#00e676;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="#080a10" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
-      <span style="font-size:17px;font-weight:700;color:#ffffff;">ChartIQ <span style="color:#f5c518;">AI</span></span>
+      <span style="font-size:17px;font-weight:700;color:#ffffff;">ChartIQ <span style="color:#00e676;">AI</span></span>
     </div>
 
     <div style="display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:99px;background:rgba(0,230,118,0.12);border:1px solid rgba(0,230,118,0.3);margin-bottom:20px;">

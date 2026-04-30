@@ -181,7 +181,7 @@ function DashboardContent() {
       {/* Back to logo */}
       <Link href="/" className="flex items-center gap-2.5 mt-10 opacity-40 hover:opacity-70 transition-opacity">
         <LogoMark />
-        <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+        <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
       </Link>
     </div>
   );

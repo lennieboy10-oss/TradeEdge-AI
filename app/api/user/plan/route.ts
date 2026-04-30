@@ -5,22 +5,58 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const userId   = searchParams.get("user_id");
   const clientId = searchParams.get("client_id");
 
-  if (!clientId) {
-    return NextResponse.json({ plan: "free", email: null, totalAnalyses: 0 });
+  if (!userId && !clientId) {
+    return NextResponse.json({ plan: "free", email: null, totalAnalyses: 0, isOnTrial: false, trialEndsAt: null });
   }
 
   const supabase = getSupabase();
-  const [profileRes, countRes] = await Promise.all([
-    supabase.from("profiles").select("plan, email").eq("client_id", clientId).single(),
-    supabase.from("journal").select("id", { count: "exact", head: true }),
-  ]);
 
-  // Return null when profile not found so client won't downgrade a local "pro" claim
+  // Look up profile — prefer user_id (auth user), fall back to client_id (anonymous)
+  const profileQuery = userId
+    ? supabase.from("profiles").select("plan, email, trial_ends_at, free_analyses_used").eq("user_id", userId).single()
+    : supabase.from("profiles").select("plan, email, trial_ends_at, free_analyses_used").eq("client_id", clientId!).single();
+
+  const countQuery = userId
+    ? supabase.from("journal").select("id", { count: "exact", head: true }).eq("user_id", userId)
+    : supabase.from("journal").select("id", { count: "exact", head: true }).eq("client_id", clientId!);
+
+  const [profileRes, countRes] = await Promise.all([profileQuery, countQuery]);
+
+  // PGRST116 = no row found (new anonymous user) — auto-create trial profile
+  if (profileRes.error?.code === "PGRST116" && !userId) {
+    const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      await supabase.from("profiles").upsert(
+        { client_id: clientId, plan: "trial", trial_ends_at: trialEndsAt },
+        { onConflict: "client_id", ignoreDuplicates: true }
+      );
+    } catch { /* non-fatal */ }
+    return NextResponse.json({
+      plan:          null,
+      email:         null,
+      totalAnalyses: countRes.count ?? 0,
+      isOnTrial:     true,
+      trialEndsAt,
+    });
+  }
+
+  if (profileRes.error) {
+    return NextResponse.json({ plan: null, email: null, totalAnalyses: 0, isOnTrial: false, trialEndsAt: null });
+  }
+
+  const serverPlan  = profileRes.data?.plan          ?? null;
+  const trialEndsAt = profileRes.data?.trial_ends_at ?? null;
+  const isOnTrial   = serverPlan !== "pro" && !!trialEndsAt && new Date(trialEndsAt) > new Date();
+
   return NextResponse.json({
-    plan:          profileRes.data?.plan  ?? null,
-    email:         profileRes.data?.email ?? null,
-    totalAnalyses: countRes.count         ?? 0,
+    plan:               serverPlan,
+    email:              profileRes.data?.email               ?? null,
+    totalAnalyses:      countRes.count                       ?? 0,
+    freeAnalysesUsed:   profileRes.data?.free_analyses_used  ?? 0,
+    isOnTrial,
+    trialEndsAt,
   });
 }

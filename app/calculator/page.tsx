@@ -67,7 +67,7 @@ function WhatIfScenarios({
         {[
           { label: "Conservative", riskPct: 0.5, color: "#4ade80" },
           { label: "Standard",     riskPct: 1,   color: "#00e676" },
-          { label: "Aggressive",   riskPct: 2,   color: "#f59e0b" },
+          { label: "Aggressive",   riskPct: 2,   color: "#9ca3af" },
         ].map((sc) => {
           const riskAmt = balance * sc.riskPct / 100;
           const calc    = doCalc(assetType, riskAmt, entryVal, slVal, tp1Val, asset);
@@ -154,7 +154,7 @@ export default function CalculatorPage() {
                 <path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="#080a10" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
           </a>
           <span className="text-[#4b5563] text-sm hidden md:inline">/ Position Calculator</span>
           <div className="ml-auto hidden md:flex items-center gap-5">

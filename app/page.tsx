@@ -2,7 +2,15 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useUserPlan } from "@/app/lib/plan-context";
+import { useAuth } from "@/app/lib/auth-context";
+import { AuthNavButtons } from "@/app/providers";
 import { motion } from "framer-motion";
+import ShareModal from "@/app/components/ShareModal";
+import type { ShareCardParams } from "@/app/lib/shareCard";
+import AnnotatedChart from "@/app/components/AnnotatedChart";
+import type { SMCData } from "@/app/components/AnnotatedChart";
+import PineScriptExport from "@/app/components/PineScriptExport";
+import MTTradeSetup from "@/app/components/MTTradeSetup";
 
 // ── Types ──────────────────────────────────────────────────────
 type AnalysisResult = {
@@ -26,6 +34,21 @@ type AnalysisResult = {
   invalidationLevel?: string;
   bestSession?: string;
   historicalSetups?: { pattern: string; asset: string; period: string; result: string }[];
+  // Smart Entry Timer fields
+  entrySession?: string | null;
+  entryTimeUTC?: string | null;
+  entryRationale?: string | null;
+  waitForConfirmation?: string | null;
+  // SMC fields
+  fvg?:             { type: string; priceRange: string; filled?: boolean; description?: string }[];
+  liquiditySweeps?: { direction?: string; price: string; description?: string }[];
+  orderBlocks?:     { type: string; priceRange: string; description?: string }[];
+  structureBreaks?: { type: string; price: string; description?: string }[];
+  equalLevels?:     { type: string; price: string; description?: string }[];
+  marketZone?:      string;
+  patterns?:        { name: string; direction?: string; target?: string; description?: string }[];
+  smcFibonacci?:    { level: string; price: string; description?: string }[];
+  smc_summary?:     string | null;
 };
 
 type MultiResult = {
@@ -75,6 +98,61 @@ function fmtCalCountdown(min: number): string {
   if (min < 60) return `in ${min}m`;
   const h = Math.floor(min / 60), m = min % 60;
   return m > 0 ? `in ${h}h ${m}m` : `in ${h}h`;
+}
+
+// ── Session utilities ──────────────────────────────────────────
+const SESSION_RANGES: Record<string, [number, number]> = {
+  "asian":           [0,   540],
+  "asian session":   [0,   540],
+  "london":          [480, 1020],
+  "london open":     [480, 1020],
+  "london session":  [480, 1020],
+  "ny":              [780, 1320],
+  "ny open":         [780, 1320],
+  "ny session":      [780, 1320],
+  "new york":        [780, 1320],
+  "london/ny overlap": [780, 1020],
+  "overlap":         [780, 1020],
+};
+
+function utcNowMins(): number {
+  const d = new Date();
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+
+function isSessionActive(sessionName: string): boolean {
+  const nowMins = utcNowMins();
+  const key = (sessionName ?? "").toLowerCase().trim();
+  for (const [k, [s, e]] of Object.entries(SESSION_RANGES)) {
+    if (key === k || key.includes(k) || k.includes(key)) {
+      return nowMins >= s && nowMins < e;
+    }
+  }
+  return false;
+}
+
+function getCountdownToUTC(entryTimeUTC: string): { secs: number; isNow: boolean; tomorrow: boolean } {
+  const parts = entryTimeUTC.split(":");
+  const h = parseInt(parts[0] ?? "0", 10) || 0;
+  const m = parseInt(parts[1] ?? "0", 10) || 0;
+  const now = new Date();
+  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), h, m, 0));
+  const diffMs = target.getTime() - now.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  if (diffSecs > -1800 && diffSecs <= 0) return { secs: 0, isNow: true, tomorrow: false };
+  if (diffSecs < -1800) {
+    const tom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, h, m, 0));
+    return { secs: Math.floor((tom.getTime() - now.getTime()) / 1000), isNow: false, tomorrow: true };
+  }
+  return { secs: diffSecs, isNow: false, tomorrow: false };
+}
+
+function fmtCountdown(totalSecs: number): string {
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
 const CAL_FLAGS: Record<string, string> = {
@@ -128,9 +206,9 @@ function CalendarStrip({ events }: { events: CalEvent[] }) {
         {chips.map((e, i) => {
           const urgent  = e.min! < 60;
           const caution = e.min! < 240;
-          const color  = urgent ? "#f87171" : caution ? "#f59e0b" : "#00e676";
-          const bg     = urgent ? "rgba(248,113,113,0.1)" : caution ? "rgba(245,158,11,0.1)" : "rgba(0,230,118,0.1)";
-          const border = urgent ? "rgba(248,113,113,0.3)" : caution ? "rgba(245,158,11,0.3)" : "rgba(0,230,118,0.3)";
+          const color  = urgent ? "#f87171" : caution ? "#9ca3af" : "#00e676";
+          const bg     = urgent ? "rgba(248,113,113,0.1)" : caution ? "rgba(156,163,175,0.1)" : "rgba(0,230,118,0.1)";
+          const border = urgent ? "rgba(248,113,113,0.3)" : caution ? "rgba(156,163,175,0.3)" : "rgba(0,230,118,0.3)";
           const isOpen = expandedIdx === i;
           return (
             <button key={i}
@@ -187,16 +265,16 @@ function NewsWarningBanner({ events, asset }: { events: CalEvent[]; asset: strin
   const minStr = first.min <= 0 ? "NOW" : first.min < 60 ? `${first.min} MINUTES` : `${Math.ceil(first.min / 60)} HOURS`;
 
   return (
-    <div className="rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/[0.07] p-3.5 mb-4 flex items-start gap-3">
+    <div className="rounded-xl border border-[#9ca3af]/30 bg-[#9ca3af]/[0.07] p-3.5 mb-4 flex items-start gap-3">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0 mt-0.5">
-        <path d="M8 2L1.5 13.5h13L8 2z" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M8 6.5v3.5M8 11.5v.5" stroke="#f59e0b" strokeWidth="1.4" strokeLinecap="round"/>
+        <path d="M8 2L1.5 13.5h13L8 2z" stroke="#9ca3af" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M8 6.5v3.5M8 11.5v.5" stroke="#9ca3af" strokeWidth="1.4" strokeLinecap="round"/>
       </svg>
       <div className="flex-1 min-w-0">
-        <p className="text-[#f59e0b] text-xs font-bold uppercase tracking-[0.1em] mb-0.5 font-dm-mono">
+        <p className="text-[#9ca3af] text-xs font-bold uppercase tracking-[0.1em] mb-0.5 font-dm-mono">
           HIGH IMPACT NEWS IN {minStr}
         </p>
-        <p className="text-[#fcd34d] text-xs leading-relaxed">
+        <p className="text-[#fca5a5] text-xs leading-relaxed">
           {warnings.map((w) => `${w.title} (${w.country})`).join(" · ")} · Consider waiting for the news candle to close before entering this trade.
         </p>
       </div>
@@ -330,6 +408,37 @@ function LogoMark() {
   );
 }
 
+// ── Session clock (nav widget) ─────────────────────────────────
+function SessionClock() {
+  const [nowMins, setNowMins] = useState(utcNowMins);
+  useEffect(() => {
+    const t = setInterval(() => setNowMins(utcNowMins()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const sessions = [
+    { name: "Asia",   range: [0, 540]    as [number, number] },
+    { name: "London", range: [480, 1020] as [number, number] },
+    { name: "NY",     range: [780, 1320] as [number, number] },
+  ];
+  return (
+    <div className="hidden lg:flex items-center gap-2.5 px-3 py-1.5 rounded-xl border border-white/[0.07] bg-white/[0.03]" title="Live market sessions (UTC)">
+      {sessions.map(({ name, range }) => {
+        const active = nowMins >= range[0] && nowMins < range[1];
+        return (
+          <div key={name} className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors duration-500"
+              style={{ background: active ? "#00e676" : "#374151", boxShadow: active ? "0 0 4px rgba(0,230,118,0.6)" : "none" }} />
+            <span className="font-dm-mono text-[9px] font-semibold transition-colors duration-500"
+              style={{ color: active ? "#00e676" : "#374151" }}>
+              {name}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -354,7 +463,7 @@ function ConfidenceGauge({ score }: { score: number }) {
 
   const color =
     score >= 75 ? "#00e676" :
-    score >= 50 ? "#f59e0b" :
+    score >= 50 ? "#9ca3af" :
     "#ff4444";
 
   const label =
@@ -543,7 +652,7 @@ function AnalysisExpiry() {
   const s = secs % 60;
   const expired = secs === 0;
   return (
-    <span className="font-dm-mono font-bold" style={{ color: secs < 120 ? "#f87171" : "#f59e0b" }}>
+    <span className="font-dm-mono font-bold" style={{ color: secs < 120 ? "#f87171" : "#9ca3af" }}>
       {expired ? "EXPIRED" : `${m}:${String(s).padStart(2, "0")}`}
     </span>
   );
@@ -552,6 +661,8 @@ function AnalysisExpiry() {
 // ── Daily limit modal ──────────────────────────────────────────
 function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: string | null }) {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [showDemo, setShowDemo]               = useState(false);
+  const [annual, setAnnual]                   = useState(false);
 
   async function handleUpgrade() {
     setCheckoutLoading(true);
@@ -559,13 +670,19 @@ function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: stri
       const res  = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId }),
+        body: JSON.stringify({ clientId, annual }),
       });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
     } catch { /* silent */ }
     setCheckoutLoading(false);
   }
+
+  if (showDemo) {
+    return <DemoProAnalysis onBack={() => setShowDemo(false)} onUpgrade={handleUpgrade} checkoutLoading={checkoutLoading} />;
+  }
+
+  const dailyCost = annual ? "41p" : "64p";
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto"
@@ -582,90 +699,112 @@ function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: stri
         }}
       >
         {/* Header */}
-        <h2 className="font-bebas text-[38px] leading-none tracking-[0.05em] text-white mb-1">
-          DAILY LIMIT REACHED
+        <h2 className="font-bebas text-[42px] leading-none tracking-[0.05em] text-white mb-1">
+          YOU HIT YOUR LIMIT
         </h2>
-        <p className="text-[#6b7280] text-sm mb-4">You&apos;ve used all 3 free analyses today.</p>
+        <p className="text-[#6b7280] text-sm mb-5">You have used all 5 of your free analyses. Upgrade to Pro for unlimited chart analysis.</p>
 
-        {/* "You just missed" — blurred Pro features */}
+        {/* What they're missing */}
         <div className="rounded-xl overflow-hidden mb-4"
           style={{ border: "1px solid rgba(0,230,118,0.15)", background: "rgba(0,230,118,0.04)" }}>
-          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-              <path d="M1 9L3.5 5.5L6 7.5L9.5 2.5" stroke="#f59e0b" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#f59e0b] font-semibold">
-              You just missed
+          <div className="px-4 py-2.5 border-b border-white/[0.06]">
+            <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#9ca3af] font-semibold text-left">
+              Your last chart had hidden Pro insights — unlock them:
             </p>
           </div>
-          <div className="p-3 space-y-1.5 select-none" style={{ filter: "blur(3px)", pointerEvents: "none" }}>
+          <div className="p-3 text-left space-y-1.5">
             {[
-              { label: "Trade Score", value: "A+", color: "#00e676" },
-              { label: "Fibonacci", value: "0.618 at $67,420", color: "#f59e0b" },
-              { label: "Invalidation", value: "$65,200 — bearish break", color: "#f87171" },
-              { label: "Historical Match", value: "BTC Bull Flag · Mar 2024 · +18%", color: "#c084fc" },
-            ].map((row) => (
-              <div key={row.label} className="flex justify-between items-center py-1.5 border-b border-white/[0.04] last:border-0">
-                <span className="text-[#6b7280] text-xs">{row.label}</span>
-                <span className="font-dm-mono text-xs font-bold" style={{ color: row.color }}>{row.value}</span>
+              "Fibonacci retracement levels",
+              "Smart money concept analysis",
+              "Historical pattern match",
+              "Exact invalidation with reasoning",
+              "Best trading session for this setup",
+              "Personal coaching tip based on your journal",
+            ].map((f) => (
+              <div key={f} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="flex-shrink-0">
+                  <path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {f}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Analysis expiry warning */}
-        <div className="rounded-xl border border-[#f59e0b]/20 bg-[#f59e0b]/[0.06] p-3 mb-4 flex items-center gap-3">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0">
-            <circle cx="8" cy="8" r="6.5" stroke="#f59e0b" strokeWidth="1.2"/>
-            <path d="M8 5v3.5l2 2" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          <p className="font-dm-mono text-[11px] text-[#fcd34d] text-left">
-            This analysis expires in <AnalysisExpiry /> — upgrade now to save it to your journal
+        {/* Monthly / Annual toggle */}
+        <div className="flex items-center gap-2 mb-4">
+          <button onClick={() => setAnnual(false)}
+            className="flex-1 py-2 rounded-lg font-dm-mono text-xs font-bold transition-all"
+            style={!annual ? { background: "#00e676", color: "#080a10" } : { background: "rgba(255,255,255,0.05)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.09)" }}>
+            Monthly
+          </button>
+          <button onClick={() => setAnnual(true)}
+            className="flex-1 py-2 rounded-lg font-dm-mono text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+            style={annual ? { background: "#00e676", color: "#080a10" } : { background: "rgba(255,255,255,0.05)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.09)" }}>
+            Annual
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full"
+              style={{ background: annual ? "rgba(8,10,16,0.25)" : "rgba(0,230,118,0.15)", color: annual ? "#080a10" : "#00e676" }}>
+              SAVE 35%
+            </span>
+          </button>
+        </div>
+
+        {/* Daily cost pricing */}
+        <div className="mb-1">
+          <p className="font-bebas text-[52px] leading-none tracking-[0.03em] text-[#00e676]">{dailyCost} per day</p>
+          <p className="text-[#4b5563] text-xs mt-0.5">
+            {annual ? "£149/yr billed annually" : "£19 billed monthly"} — cancel any time
           </p>
         </div>
 
         {/* Social proof */}
-        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 mb-4 flex items-center justify-between">
-          <div className="flex -space-x-2">
-            {["#00e676","#f59e0b","#c084fc","#38bdf8"].map((c, i) => (
-              <div key={i} className="w-6 h-6 rounded-full border-2 border-[#080c0a]"
-                style={{ background: `${c}40`, borderColor: "#080c0a" }} />
-            ))}
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 my-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-1">
+              {[0,1,2,3,4].map((i) => (
+                <svg key={i} width="11" height="11" viewBox="0 0 14 14" fill="#00e676">
+                  <path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/>
+                </svg>
+              ))}
+              <span className="font-dm-mono text-[10px] text-[#6b7280] ml-1">4.9/5 · 312 reviews</span>
+            </div>
           </div>
-          <p className="font-dm-mono text-[10px] text-[#6b7280] text-right">
-            <span className="text-white font-bold">847 traders</span> upgraded this week
+          <div className="flex items-center justify-between">
+            <span className="font-dm-mono text-[10px] text-[#6b7280]">847 traders upgraded this week</span>
+            <span className="font-dm-mono text-[10px] text-[#6b7280]">73% of users are on Pro</span>
+          </div>
+        </div>
+
+        {/* Urgency */}
+        <div className="rounded-xl border border-[#9ca3af]/20 bg-[#9ca3af]/[0.06] px-4 py-2 mb-4">
+          <p className="font-dm-mono text-[10px] text-[#9ca3af]">
+            Launch price — increases to £29/mo on 1st June 2026
           </p>
         </div>
 
-        {/* Resets in */}
-        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] py-3 px-4 mb-4 flex items-center justify-between">
-          <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#4b5563] font-semibold">
-            Free tier resets in
-          </p>
-          <MidnightCountdown />
-        </div>
-
-        {/* CTA */}
+        {/* Primary CTA */}
         <button
           onClick={handleUpgrade}
           disabled={checkoutLoading}
           className="w-full py-4 rounded-xl text-base font-bold mb-3 transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.98] disabled:opacity-60"
-          style={{
-            background: "#00e676",
-            color: "#080c0a",
-            boxShadow: "0 0 28px rgba(0,230,118,0.32), 0 4px 16px rgba(0,0,0,0.3)",
-          }}
-        >
-          {checkoutLoading ? "Redirecting…" : "Unlock Full Analysis — £19/mo"}
+          style={{ background: "#00e676", color: "#080c0a", boxShadow: "0 0 28px rgba(0,230,118,0.32)" }}>
+          {checkoutLoading ? "Redirecting…" : `Start Pro now — ${dailyCost}/day`}
         </button>
 
-        {/* 7-day guarantee */}
-        <p className="font-dm-mono text-[10px] text-[#4b5563] mb-3">
-          7-day money back guarantee · Cancel anytime
-        </p>
+        {/* Secondary CTA — demo */}
+        <button onClick={() => setShowDemo(true)}
+          className="w-full py-3 rounded-xl text-sm font-semibold border border-white/[0.12] text-white hover:bg-white/[0.06] transition-all duration-150 mb-4">
+          See a Pro analysis example →
+        </button>
 
-        <button onClick={onClose}
-          className="text-[#4b5563] text-xs hover:text-[#9ca3af] transition-colors">
+        {/* Trust badges */}
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {["✅ 7 day money back", "✅ Cancel any time", "✅ Instant access"].map((b) => (
+            <p key={b} className="font-dm-mono text-[9px] text-[#4b5563] text-center leading-snug">{b}</p>
+          ))}
+        </div>
+
+        <button onClick={onClose} className="text-[#4b5563] text-xs hover:text-[#9ca3af] transition-colors">
           No thanks, wait until tomorrow
         </button>
       </motion.div>
@@ -721,7 +860,7 @@ function TradeScore({ grade }: { grade: string }) {
   const cfg: Record<string, { color: string; bg: string; border: string; label: string }> = {
     "A+": { color: "#00e676", bg: "rgba(0,230,118,0.1)",   border: "rgba(0,230,118,0.35)",  label: "Perfect setup" },
     "A":  { color: "#4ade80", bg: "rgba(74,222,128,0.1)",  border: "rgba(74,222,128,0.35)", label: "Strong setup" },
-    "B":  { color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.35)", label: "Decent setup" },
+    "B":  { color: "#9ca3af", bg: "rgba(156,163,175,0.1)",  border: "rgba(156,163,175,0.35)", label: "Decent setup" },
     "C":  { color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.3)", label: "Trade with caution" },
     "D":  { color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)",   label: "Avoid this trade" },
   };
@@ -789,11 +928,11 @@ function ProDeepAnalysis({ a }: { a: AnalysisResult }) {
       {/* Fibonacci */}
       {a.fibonacci && (
         <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
-          <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#f59e0b] font-semibold mb-3">Fibonacci Levels</p>
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#9ca3af] font-semibold mb-3">Fibonacci Levels</p>
           <div className="space-y-1.5 mb-2">
             {a.fibonacci.keyLevels.map((l, i) => (
               <div key={i} className="flex items-center gap-2 text-sm">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] flex-shrink-0" />
+                <div className="w-1.5 h-1.5 rounded-full bg-[#9ca3af] flex-shrink-0" />
                 <span className="font-dm-mono text-[#d1d5db]">{l}</span>
               </div>
             ))}
@@ -859,29 +998,220 @@ function ProDeepAnalysis({ a }: { a: AnalysisResult }) {
   );
 }
 
-// ── Free watermark overlay ─────────────────────────────────────
+// ── Smart Entry Timer widget ───────────────────────────────────
+function EntryTimerWidget({
+  entrySession, entryTimeUTC, entryRationale, waitForConfirmation,
+  isPro, clientId,
+}: {
+  entrySession: string;
+  entryTimeUTC: string;
+  entryRationale?: string | null;
+  waitForConfirmation?: string | null;
+  isPro: boolean;
+  clientId: string | null;
+}) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  void tick; // triggers re-render every second
+
+  const { secs, isNow, tomorrow } = getCountdownToUTC(entryTimeUTC);
+  const sessionActive = isSessionActive(entrySession);
+
+  // Local time label
+  const parts = entryTimeUTC.split(":");
+  const h = parseInt(parts[0] ?? "0", 10) || 0;
+  const m = parseInt(parts[1] ?? "0", 10) || 0;
+  const localTime = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate(), h, m, 0))
+    .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+
+  function handleUpgrade() {
+    if (!clientId) return;
+    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+      .then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; });
+  }
+
+  if (!isPro) {
+    return (
+      <div className="relative rounded-2xl overflow-hidden">
+        <div style={{ filter: "blur(4px)", pointerEvents: "none", userSelect: "none" }}>
+          <div className="rounded-2xl p-4" style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.2)" }}>
+            <p className="font-dm-mono text-[10px] uppercase tracking-[0.16em] text-[#00e676] font-semibold mb-2">Optimal Entry Window</p>
+            <p className="font-bebas text-[30px] text-white leading-none mb-1">NY OPEN</p>
+            <p className="font-dm-mono text-[18px] font-bold text-[#00e676]">Opens in 2h 15m 30s</p>
+            <p className="font-dm-mono text-[10px] text-[#6b7280] mt-2">13:30 UTC · 14:30 BST · Wait for close above...</p>
+          </div>
+        </div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-5 gap-2.5 rounded-2xl"
+          style={{ backdropFilter: "blur(2px)", background: "rgba(8,10,16,0.78)" }}>
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <rect x="2.5" y="9.5" width="17" height="11" rx="2.5" stroke="#00e676" strokeWidth="1.3"/>
+            <path d="M7 9.5V7a4 4 0 018 0v2.5" stroke="#00e676" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+          <p className="text-white font-bold text-sm">Smart Entry Timer — Pro Only</p>
+          <p className="text-[#6b7280] text-[11px] leading-snug max-w-[200px]">
+            Optimal entry time with live countdown and session awareness
+          </p>
+          <button onClick={handleUpgrade}
+            className="px-4 py-2 rounded-xl text-xs font-bold transition-all hover:-translate-y-0.5 mt-1"
+            style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 16px rgba(0,230,118,0.3)" }}>
+            Upgrade to Pro — £19/mo
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.7, duration: 0.4 }}
+      className="rounded-2xl p-4 relative overflow-hidden"
+      style={{
+        background: isNow ? "rgba(0,230,118,0.09)" : "rgba(0,230,118,0.04)",
+        border: isNow ? "1px solid rgba(0,230,118,0.4)" : "1px solid rgba(0,230,118,0.18)",
+        boxShadow: isNow ? "0 0 28px rgba(0,230,118,0.14)" : undefined,
+      }}>
+      {/* Pulse overlay when active */}
+      {isNow && (
+        <motion.div className="absolute inset-0 rounded-2xl pointer-events-none"
+          animate={{ opacity: [0.3, 0.6, 0.3] }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          style={{ background: "rgba(0,230,118,0.05)" }} />
+      )}
+
+      <div className="flex items-start justify-between mb-2.5">
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.16em] text-[#00e676] font-semibold">
+          Optimal Entry Window
+        </p>
+        {sessionActive && (
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00e676] animate-pulse" />
+            <span className="font-dm-mono text-[9px] text-[#00e676] font-bold uppercase tracking-wider">Active</span>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-3">
+        <p className="font-bebas text-[30px] text-white leading-none mb-1">{entrySession.toUpperCase()}</p>
+        {isNow ? (
+          <motion.p
+            className="font-dm-mono text-base font-bold"
+            style={{ color: "#00e676" }}
+            animate={{ opacity: [0.7, 1, 0.7] }}
+            transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}>
+            ⚡ ENTRY WINDOW NOW OPEN
+          </motion.p>
+        ) : (
+          <p className="font-dm-mono font-bold text-[#d1d5db]" style={{ fontSize: "15px" }}>
+            {tomorrow ? "Next window: Tomorrow" : "Opens in"}{" "}
+            <span style={{ color: "#00e676" }}>{fmtCountdown(secs)}</span>
+          </p>
+        )}
+      </div>
+
+      <p className="font-dm-mono text-[10px] text-[#6b7280] mb-3">
+        <span className="text-[#9ca3af]">{entryTimeUTC} UTC</span>
+        {" · "}
+        {localTime}
+        {tomorrow && (
+          <span className="ml-2 px-1.5 py-0.5 rounded text-[9px]"
+            style={{ background: "rgba(156,163,175,0.12)", border: "1px solid rgba(156,163,175,0.2)", color: "#9ca3af" }}>
+            tomorrow
+          </span>
+        )}
+      </p>
+
+      {entryRationale && (
+        <p className="text-[#6b7280] text-xs leading-relaxed mb-2.5">{entryRationale}</p>
+      )}
+
+      {waitForConfirmation && (
+        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl"
+          style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.14)" }}>
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="flex-shrink-0 mt-0.5">
+            <circle cx="5.5" cy="5.5" r="4.5" stroke="#00e676" strokeWidth="1.1"/>
+            <path d="M3.5 5.5l1.5 1.5L8 3.5" stroke="#00e676" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <p className="text-[#d1d5db] text-xs leading-relaxed">{waitForConfirmation}</p>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ── Entry window toast notification ───────────────────────────
+function EntryWindowToast({ asset, signal, onClose }: { asset: string | null; signal: string; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 10_000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 60 }}
+      transition={{ type: "spring", bounce: 0.18 }}
+      className="fixed top-20 right-6 z-[300] max-w-[270px] rounded-xl px-4 py-3"
+      style={{
+        background: "#0c1410",
+        border: "1px solid rgba(0,230,118,0.45)",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.55), 0 0 20px rgba(0,230,118,0.12)",
+      }}>
+      <div className="flex items-start gap-2.5">
+        <span className="w-2 h-2 rounded-full bg-[#00e676] animate-pulse mt-1 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#00e676] font-bold mb-0.5">
+            ⚡ Entry Window Open
+          </p>
+          <p className="text-[#d1d5db] text-xs leading-snug">
+            Entry window now open for your {asset ?? "chart"} {signal} setup
+          </p>
+        </div>
+        <button onClick={onClose} className="flex-shrink-0 text-[#4b5563] hover:text-white transition-colors mt-0.5">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Pro insights banner (shown after analysis for free users) ──
 function FreeWatermark({ onUpgrade }: { onUpgrade: () => void }) {
   return (
     <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.6, duration: 0.4 }}
+      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 1.8, duration: 0.4 }}
       className="rounded-2xl overflow-hidden"
-      style={{ border: "1px solid rgba(0,230,118,0.15)", background: "rgba(0,230,118,0.03)" }}>
-      <div className="p-4 text-center">
-        <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#4b5563] mb-2 font-semibold">
-          Pro analysis hidden
+      style={{ border: "1px solid rgba(0,230,118,0.2)", background: "rgba(0,230,118,0.03)" }}>
+      <div className="px-4 py-3 border-b border-white/[0.06]">
+        <p className="font-dm-mono text-[11px] uppercase tracking-[0.12em] text-[#00e676] font-semibold">
+          You are missing 6 Pro insights on this chart
         </p>
-        <div className="flex flex-wrap justify-center gap-2 mb-3">
-          {["Trade Score", "Fibonacci Levels", "Volume Analysis", "Market Structure", "Momentum", "Price Levels", "Invalidation", "Historical Setups"].map((f) => (
-            <span key={f} className="font-dm-mono text-[10px] px-2 py-0.5 rounded-full"
-              style={{ background: "rgba(0,230,118,0.08)", border: "1px solid rgba(0,230,118,0.18)", color: "#4b5563" }}>
-              {f}
-            </span>
-          ))}
-        </div>
+      </div>
+      {/* Blurred preview of Pro insights */}
+      <div className="p-4 space-y-2 select-none" style={{ filter: "blur(3.5px)", pointerEvents: "none" }}>
+        {[
+          { label: "Fibonacci levels",          value: "0.618 retracement at key supply zone" },
+          { label: "Smart Money Concepts",       value: "Bearish order block — institutional supply" },
+          { label: "Historical pattern match",   value: "Similar setup +14% — March 2024" },
+          { label: "Best session to trade",      value: "NY open 14:30 UTC — peak liquidity" },
+          { label: "Detailed 8-line summary",    value: "Full institutional-grade breakdown..." },
+          { label: "Personal coaching tip",      value: "Based on your recent journal entries..." },
+        ].map((row) => (
+          <div key={row.label} className="flex justify-between items-center py-1.5 border-b border-white/[0.04] last:border-0">
+            <span className="text-[#6b7280] text-xs">{row.label}</span>
+            <span className="font-dm-mono text-xs text-[#00e676]">{row.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className="px-4 pb-4">
         <button onClick={onUpgrade}
-          className="px-6 py-2.5 rounded-xl text-xs font-bold transition-all hover:-translate-y-0.5"
-          style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 20px rgba(0,230,118,0.35)" }}>
-          Unlock 8 More Insights — £19/mo
+          className="w-full py-3 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
+          style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 20px rgba(0,230,118,0.3)" }}>
+          Unlock all insights — £19/mo
         </button>
       </div>
     </motion.div>
@@ -943,9 +1273,9 @@ function ConfluerenceChecklist({ checks }: { checks: { label: string; passed: bo
         </p>
         <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-full"
           style={{
-            background: passed >= 4 ? "rgba(0,230,118,0.12)" : passed >= 3 ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.1)",
-            color:      passed >= 4 ? "#00e676"               : passed >= 3 ? "#f59e0b"               : "#f87171",
-            border:     `1px solid ${passed >= 4 ? "rgba(0,230,118,0.3)" : passed >= 3 ? "rgba(245,158,11,0.3)" : "rgba(239,68,68,0.25)"}`,
+            background: passed >= 4 ? "rgba(0,230,118,0.12)" : passed >= 3 ? "rgba(156,163,175,0.1)" : "rgba(239,68,68,0.1)",
+            color:      passed >= 4 ? "#00e676"               : passed >= 3 ? "#9ca3af"               : "#f87171",
+            border:     `1px solid ${passed >= 4 ? "rgba(0,230,118,0.3)" : passed >= 3 ? "rgba(156,163,175,0.25)" : "rgba(239,68,68,0.25)"}`,
           }}>
           {passed}/{checks.length} aligned
         </span>
@@ -971,7 +1301,7 @@ function StructuredSummary({ text, isPro, startDelay = 0 }: { text: string; isPr
     return <WordFade text={text} startDelay={startDelay} />;
   }
   const labels = ["What", "Entry", "Invalidation", "Confirmation", "Risk"];
-  const colors = ["#d1d5db", "#4ade80", "#f87171", "#38bdf8", "#f59e0b"];
+  const colors = ["#d1d5db", "#4ade80", "#f87171", "#38bdf8", "#9ca3af"];
   return (
     <div className="space-y-2">
       {points.map((pt, i) => (
@@ -1023,7 +1353,7 @@ function WhatIfScenarios({
         {[
           { label: "Conservative", riskPct: 0.5, color: "#4ade80" },
           { label: "Standard",     riskPct: 1,   color: "#00e676" },
-          { label: "Aggressive",   riskPct: 2,   color: "#f59e0b" },
+          { label: "Aggressive",   riskPct: 2,   color: "#9ca3af" },
         ].map((sc) => {
           const riskAmt = balance * sc.riskPct / 100;
           const calc    = doCalc(assetType, riskAmt, entryVal, slVal, tp1Val, asset);
@@ -1469,12 +1799,750 @@ function ChatBox({ journalId, analysisJson, chartBase64, chartMime, clientId, is
   );
 }
 
+// ── Welcome modal (shows once per device to non-logged-in users) ──
+function WelcomeModal({ onClose }: { onClose: () => void }) {
+  const proFeatures = [
+    "Unlimited chart analyses",
+    "Confidence score and trade grade",
+    "Multi-timeframe analysis",
+    "Trade journal with win rate tracking",
+    "Watchlist with email alerts",
+    "Economic calendar",
+    "Risk calculator",
+    "Follow-up AI chat on every chart",
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
+        className="relative max-w-md w-full rounded-2xl p-7 overflow-hidden"
+        style={{
+          background: "#0d1310",
+          border: "1px solid rgba(0,230,118,0.35)",
+          boxShadow: "0 0 60px rgba(0,230,118,0.15), 0 24px 64px rgba(0,0,0,0.6)",
+        }}>
+        {/* Glow orb */}
+        <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full pointer-events-none"
+          style={{ background: "radial-gradient(circle, rgba(0,230,118,0.12) 0%, transparent 70%)" }} />
+
+        {/* Close */}
+        <button onClick={onClose}
+          className="absolute top-4 right-4 w-8 h-8 rounded-lg flex items-center justify-center text-[#4b5563] hover:text-white hover:bg-white/[0.06] transition-all">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </button>
+
+        {/* Top section */}
+        <div className="text-center mb-6">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-[#00e676]/40 bg-[#00e676]/10 text-[#00e676] text-[10px] font-bold tracking-widest uppercase mb-4">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00e676] animate-pulse" />
+            LIMITED TIME
+          </div>
+          <h2 className="font-bebas text-[44px] leading-none tracking-[0.03em] text-white mb-2">
+            7 DAYS FREE PRO ACCESS
+          </h2>
+          <p className="text-[#6b7280] text-sm">No credit card required. Cancel any time.</p>
+        </div>
+
+        {/* Feature list */}
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 mb-5">
+          <p className="text-[#6b7280] text-[11px] font-semibold uppercase tracking-[0.12em] mb-3">
+            Everything in Pro free for 7 days:
+          </p>
+          <ul className="grid grid-cols-2 gap-x-3 gap-y-2">
+            {proFeatures.map((f) => (
+              <li key={f} className="flex items-start gap-1.5 text-xs text-[#d1d5db]">
+                <span className="text-[#00e676] flex-shrink-0 mt-0.5">✅</span>
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* CTA */}
+        <a href="/signup"
+          onClick={onClose}
+          className="block w-full py-3.5 rounded-xl text-sm font-bold text-center transition-all duration-200 hover:-translate-y-0.5 mb-3"
+          style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 24px rgba(0,230,118,0.4)" }}>
+          Start my free trial →
+        </a>
+        <p className="text-center text-[#4b5563] text-xs mb-1">
+          Join 2,400+ traders already using ChartIQ
+        </p>
+        <p className="text-center text-[#374151] text-[10px]">
+          7 day free trial · Then £19/mo · Cancel any time
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── Sticky top trial banner (non-logged-in only) ──────────────
+function TrialTopBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="relative z-40 flex items-center justify-center gap-3 py-2.5 px-6"
+      style={{ background: "#00e676" }}>
+      <a href="/signup" className="flex items-center gap-2 flex-1 justify-center">
+        <span className="text-sm font-bold text-[#080a10]">
+          🚀 Start your 7 day free Pro trial — no card needed
+        </span>
+        <span className="hidden sm:inline font-bold text-[#080a10] text-xs px-3 py-1 rounded-lg"
+          style={{ background: "rgba(0,0,0,0.12)" }}>
+          Start free →
+        </span>
+      </a>
+      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDismiss(); }}
+        className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full hover:bg-black/10 transition-colors"
+        aria-label="Dismiss">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 2l8 8M10 2L2 10" stroke="#080a10" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// ── Mobile floating bottom bar (non-logged-in only) ───────────
+function MobileTrialBar() {
+  return (
+    <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 p-3 pb-[max(12px,env(safe-area-inset-bottom))]"
+      style={{ background: "linear-gradient(to top, #080a10 60%, transparent)" }}>
+      <a href="/signup"
+        className="block w-full py-4 rounded-xl text-sm font-bold text-center transition-all active:scale-[0.98]"
+        style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 24px rgba(0,230,118,0.5)" }}>
+        Start free 7 day trial →
+      </a>
+    </div>
+  );
+}
+
+// ── Live activity feed (bottom-left) ──────────────────────────
+const LIVE_NOTIFICATIONS = [
+  { text: "James from London just upgraded to Pro ↑", upgrade: true },
+  { text: "Sarah just analysed EUR/USD — LONG 87% confidence", upgrade: false },
+  { text: "Mike from Dubai just upgraded to Pro ↑", upgrade: true },
+  { text: "Alex just analysed BTC/USD — SHORT 91% confidence", upgrade: false },
+  { text: "Emma from Sydney just upgraded to Pro ↑", upgrade: true },
+  { text: "Trading group of 12 just joined on Team plan", upgrade: true },
+];
+
+function LiveActivityFeed() {
+  const [idx, setIdx]             = useState(0);
+  const [visible, setVisible]     = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (!visible || dismissed) return;
+    const t = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIdx(i => (i + 1) % LIVE_NOTIFICATIONS.length);
+        setVisible(true);
+      }, 400);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [visible, dismissed]);
+
+  if (dismissed || !visible) return null;
+
+  const item = LIVE_NOTIFICATIONS[idx];
+  return (
+    <motion.div
+      key={idx}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
+      transition={{ duration: 0.35 }}
+      className="fixed bottom-6 left-6 z-40 max-w-[265px]"
+    >
+      <div className="relative rounded-xl px-4 py-3 pr-8"
+        style={{
+          background: "#0c0f18",
+          border: `1px solid ${item.upgrade ? "rgba(0,230,118,0.25)" : "rgba(255,255,255,0.09)"}`,
+          boxShadow: "0 4px 24px rgba(0,0,0,0.55)",
+        }}>
+        <div className="flex items-start gap-2">
+          <span className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0"
+            style={{ background: item.upgrade ? "#00e676" : "#6b7280" }} />
+          <p className="font-dm-mono text-[10px] leading-snug"
+            style={{ color: item.upgrade ? "#00e676" : "#9ca3af" }}>
+            {item.text}
+          </p>
+        </div>
+        <button onClick={() => setDismissed(true)}
+          className="absolute top-2 right-2 text-[#374151] hover:text-[#9ca3af] transition-colors">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Exit intent popup ──────────────────────────────────────────
+function ExitIntentPopup({ onClose }: { onClose: () => void }) {
+  const [email, setEmail]       = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email) return;
+    try {
+      await fetch("/api/exit-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+    } catch { /* silent */ }
+    setSubmitted(true);
+    setTimeout(onClose, 2500);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      style={{ background: "rgba(4,6,10,0.9)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", bounce: 0.22, duration: 0.45 }}
+        className="w-full max-w-sm rounded-2xl p-8 text-center"
+        style={{ background: "#080c0a", border: "1px solid rgba(0,230,118,0.25)", boxShadow: "0 0 60px rgba(0,230,118,0.07)" }}>
+        <div className="text-[40px] mb-3">⚡</div>
+        <h2 className="font-bebas text-[30px] leading-none tracking-[0.04em] text-white mb-2">
+          WAIT — GET 3 MORE FREE ANALYSES
+        </h2>
+        <p className="text-[#6b7280] text-sm mb-6 leading-relaxed">
+          Enter your email and we&apos;ll send you a full Pro trial — no card needed.
+        </p>
+        {submitted ? (
+          <p className="text-[#00e676] font-semibold text-sm py-4">Sent! Check your inbox.</p>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="your@email.com" required
+              className="w-full px-4 py-3 rounded-xl bg-white/[0.05] border border-white/[0.1] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#00e676]/60 transition-colors" />
+            <button type="submit"
+              className="w-full py-3.5 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
+              style={{ background: "#00e676", color: "#080c0a" }}>
+              Send me 5 free analyses →
+            </button>
+          </form>
+        )}
+        <button onClick={onClose} className="mt-4 text-[#4b5563] text-xs hover:text-[#9ca3af] transition-colors">
+          No thanks, I&apos;ll pass
+        </button>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── Demo Pro analysis modal ────────────────────────────────────
+function DemoProAnalysis({
+  onBack, onUpgrade, checkoutLoading,
+}: {
+  onBack: () => void;
+  onUpgrade: () => void;
+  checkoutLoading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto"
+      style={{ background: "rgba(4,6,10,0.96)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ type: "spring", bounce: 0.2, duration: 0.45 }}
+        className="w-full max-w-sm rounded-2xl my-4"
+        style={{ background: "#080c0a", border: "1px solid rgba(0,230,118,0.25)", boxShadow: "0 0 60px rgba(0,230,118,0.08)", position: "relative", overflow: "hidden" }}>
+        {/* DEMO watermark */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 0 }}>
+          <p className="font-bebas text-[90px] tracking-[0.2em] select-none" style={{ color: "rgba(255,255,255,0.025)" }}>DEMO</p>
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]" style={{ position: "relative", zIndex: 1 }}>
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="font-dm-mono text-[9px] font-bold tracking-widest px-2 py-0.5 rounded-full"
+                style={{ background: "rgba(0,230,118,0.15)", color: "#00e676", border: "1px solid rgba(0,230,118,0.3)" }}>
+                PRO DEMO
+              </span>
+              <span className="font-dm-mono text-[9px] text-[#4b5563]">example only</span>
+            </div>
+            <p className="font-bebas text-xl text-white tracking-[0.04em]">XAU/USD · 4H</p>
+          </div>
+          <button onClick={onBack} className="text-[#4b5563] hover:text-white transition-colors">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto" style={{ position: "relative", zIndex: 1 }}>
+          {/* Signal */}
+          <div className="rounded-2xl border p-4 flex items-center justify-between"
+            style={{ borderColor: "rgba(248,113,113,0.35)", background: "rgba(248,113,113,0.07)" }}>
+            <div>
+              <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Bias · Grade A+</p>
+              <p className="text-2xl font-extrabold text-[#f87171]">BEARISH</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[#6b7280] text-[10px] uppercase tracking-[0.12em] mb-1">Confidence</p>
+              <p className="font-bebas text-[44px] text-[#f87171] leading-none">89%</p>
+            </div>
+          </div>
+
+          {/* Trade setup */}
+          <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
+            <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Trade Setup · Confirmed Short</p>
+            {[
+              { label: "Entry",         value: "3,298",  color: "white" },
+              { label: "Stop Loss",     value: "3,315",  color: "#f87171" },
+              { label: "Take Profit",   value: "3,256",  color: "#4ade80" },
+              { label: "Risk / Reward", value: "1:2.47", color: "#c084fc" },
+            ].map((row) => (
+              <div key={row.label} className="flex justify-between items-center py-2.5 border-b border-white/[0.04] last:border-0">
+                <span className="text-[#6b7280] text-sm">{row.label}</span>
+                <span className="font-dm-mono text-sm font-semibold" style={{ color: row.color }}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Pro insights */}
+          <div className="rounded-2xl border border-[#00e676]/20 bg-[#00e676]/[0.03] p-4">
+            <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#00e676] font-semibold mb-3">
+              6 Pro Insights — hidden on free plan
+            </p>
+            <div className="space-y-2.5">
+              {[
+                { icon: "📐", label: "Fibonacci",    value: "Key retracement at 61.8% — 3,285 level. Price rejected precisely at this zone." },
+                { icon: "💡", label: "Smart Money",  value: "Bearish order block at 3,302 — strong institutional supply zone with 3 clean touches." },
+                { icon: "📊", label: "Pattern",      value: "Head and shoulders confirmed — measured move to 3,256 with high probability." },
+                { icon: "🕐", label: "Best Session", value: "NY open 14:30 UTC — highest liquidity window for XAU/USD short entries." },
+                { icon: "📋", label: "Pro Summary",  value: "Gold showing exhaustion at multi-week resistance. H&S neckline break below 3,290 confirms bearish momentum. RSI divergence aligns. Target: 3,256." },
+                { icon: "🎯", label: "Coaching Tip", value: "You tend to enter too early — wait for the 5m close below 3,290 before entering. Your last 3 SHORT entries were premature." },
+              ].map((item) => (
+                <div key={item.label} className="rounded-xl p-3"
+                  style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <p className="font-dm-mono text-[9px] font-bold text-[#00e676] uppercase tracking-wider mb-1">
+                    {item.icon} {item.label}
+                  </p>
+                  <p className="text-[#9ca3af] text-xs leading-relaxed">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* CTA */}
+          <button onClick={onUpgrade} disabled={checkoutLoading}
+            className="w-full py-4 rounded-xl text-base font-bold transition-all hover:-translate-y-0.5 disabled:opacity-60"
+            style={{ background: "#00e676", color: "#080c0a", boxShadow: "0 0 28px rgba(0,230,118,0.3)" }}>
+            {checkoutLoading ? "Redirecting…" : "Get Pro — 64p/day"}
+          </button>
+          <button onClick={onBack} className="w-full text-center text-[#4b5563] text-xs hover:text-[#9ca3af] transition-colors py-1">
+            ← Back
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── SMC tooltip definitions ────────────────────────────────────
+const SMC_TIPS: Record<string, string> = {
+  fvg:    "Fair Value Gap — a price imbalance where the market moved too fast, leaving a gap. Price frequently returns to fill these zones.",
+  ob:     "Order Block — the last candle before a strong institutional move. Banks and funds leave unfilled orders here; price often reacts when it returns.",
+  sweep:  "Liquidity Sweep — price briefly breaks a key level to trigger retail stop-losses, then immediately reverses. A classic sign smart money is entering.",
+  bos:    "Break of Structure — a confirmed break of the previous swing high (bullish) or low (bearish), signalling the trend has shifted.",
+  choch:  "Change of Character — the first sign a trend may be reversing, before it is fully confirmed. Higher risk, earlier entry signal.",
+  eqh:    "Equal Highs — two or more highs at the same price. A liquidity pool of stop-losses above, likely to be swept before a reversal.",
+  eql:    "Equal Lows — two or more lows at the same price. A liquidity pool below waiting to be swept before a potential bounce.",
+  zone:   "Premium zone = top 25% of the range (institutions prefer selling here). Discount zone = bottom 25% (institutions prefer buying here).",
+  pattern:"A classical chart pattern with a measured-move price target based on the pattern height.",
+  fib:    "Fibonacci retracement — key levels (38.2%, 50%, 61.8%, 78.6%) where price often pauses or reverses after a swing move.",
+};
+
+function SMCTooltip({ tipKey }: { tipKey: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative inline-flex flex-shrink-0"
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      <button
+        className="w-3.5 h-3.5 rounded-full flex items-center justify-center font-dm-mono text-[8px] font-bold"
+        style={{ background: "rgba(156,163,175,0.15)", border: "1px solid rgba(156,163,175,0.2)", color: "#6b7280" }}>
+        ?
+      </button>
+      {show && (
+        <div className="absolute z-50 bottom-full mb-2 w-52 rounded-xl px-3 py-2.5 text-xs leading-relaxed pointer-events-none"
+          style={{
+            left: "50%", transform: "translateX(-50%)",
+            background: "#0c0f18", border: "1px solid rgba(0,230,118,0.3)",
+            color: "#d1d5db", boxShadow: "0 4px 24px rgba(0,0,0,0.65)",
+          }}>
+          {SMC_TIPS[tipKey] ?? ""}
+          <div className="absolute top-full" style={{ left: "50%", marginLeft: "-5px", borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: "5px solid rgba(0,230,118,0.3)" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SMCCard({
+  badge, badgeColor, badgeBg, badgeBorder,
+  priceRange, status, description, tipKey,
+}: {
+  badge: string; badgeColor: string; badgeBg: string; badgeBorder: string;
+  priceRange?: string; status?: string; description?: string; tipKey?: string;
+}) {
+  return (
+    <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)" }}>
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-dm-mono text-[9px] font-bold px-2 py-0.5 rounded-full"
+            style={{ background: badgeBg, border: `1px solid ${badgeBorder}`, color: badgeColor }}>
+            {badge}
+          </span>
+          {priceRange && (
+            <span className="font-dm-mono text-[10px] font-semibold text-[#d1d5db]">{priceRange}</span>
+          )}
+        </div>
+        {tipKey && <SMCTooltip tipKey={tipKey} />}
+      </div>
+      {status      && <p className="font-dm-mono text-[10px] text-[#9ca3af] mb-1">{status}</p>}
+      {description && <p className="text-[#6b7280] text-[11px] leading-relaxed">{description}</p>}
+    </div>
+  );
+}
+
+function SMCSection({
+  a, isPro, clientId,
+}: {
+  a: AnalysisResult; isPro: boolean; clientId: string | null;
+}) {
+  function upgrade() {
+    if (!clientId) return;
+    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+      .then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; });
+  }
+
+  const fvg     = a.fvg             ?? [];
+  const sweeps  = a.liquiditySweeps ?? [];
+  const obs     = a.orderBlocks     ?? [];
+  const sb      = a.structureBreaks ?? [];
+  const eq      = a.equalLevels     ?? [];
+  const pats    = a.patterns        ?? [];
+  const fibs    = a.smcFibonacci    ?? [];
+
+  const totalSMC = fvg.length + sweeps.length + obs.length + sb.length + eq.length;
+  const hasAny   = totalSMC > 0 || pats.length > 0 || fibs.length > 0 || !!a.smc_summary;
+  if (!hasAny) return null;
+
+  const strength      = totalSMC >= 4 ? "STRONG SMC SETUP" : totalSMC >= 2 ? "MODERATE SMC" : "WEAK SMC";
+  const strengthColor = totalSMC >= 4 ? "#00e676" : totalSMC >= 2 ? "#f59e0b" : "#f87171";
+  const strengthBg    = totalSMC >= 4 ? "rgba(0,230,118,0.1)" : totalSMC >= 2 ? "rgba(245,158,11,0.1)" : "rgba(248,113,113,0.1)";
+  const strengthBdr   = totalSMC >= 4 ? "rgba(0,230,118,0.3)" : totalSMC >= 2 ? "rgba(245,158,11,0.3)" : "rgba(248,113,113,0.3)";
+
+  // Free: first FVG as teaser, rest locked
+  const visibleFVG = isPro ? fvg : fvg.slice(0, 1);
+  const hasLocked  = !isPro && (fvg.length > 1 || sweeps.length > 0 || obs.length > 0 || sb.length > 0 || eq.length > 0 || pats.length > 0 || fibs.length > 0);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 1.55, duration: 0.4 }}
+      className="rounded-2xl overflow-hidden"
+      style={{ border: "1px solid rgba(0,230,118,0.2)", background: "rgba(0,230,118,0.02)" }}
+    >
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 border-b border-white/[0.05]">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <p className="font-dm-mono text-[11px] font-bold uppercase tracking-[0.15em] text-[#00e676]">
+              Smart Money Confluences
+            </p>
+            {!isPro && (
+              <span className="font-dm-mono text-[9px] px-1.5 py-0.5 rounded-full"
+                style={{ background: "rgba(0,230,118,0.1)", border: "1px solid rgba(0,230,118,0.25)", color: "#00e676" }}>
+                PRO
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-dm-mono text-[9px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: strengthBg, border: `1px solid ${strengthBdr}`, color: strengthColor }}>
+              {strength}
+            </span>
+            {totalSMC > 0 && (
+              <span className="font-dm-mono text-[9px] text-[#4b5563]">{totalSMC} confluence{totalSMC !== 1 ? "s" : ""}</span>
+            )}
+          </div>
+        </div>
+
+        {/* SMC bias summary */}
+        {a.smc_summary && (
+          <div className="rounded-xl px-3 py-2.5"
+            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] font-bold mb-1">SMC Bias</p>
+            <p className="text-[#d1d5db] text-xs leading-relaxed">{a.smc_summary}</p>
+          </div>
+        )}
+
+        {/* Market zone pill */}
+        {isPro && a.marketZone && a.marketZone !== "neutral" && (
+          <div className="flex items-center gap-2 mt-3">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
+              style={{
+                background: a.marketZone === "premium" ? "rgba(248,113,113,0.08)" : "rgba(0,230,118,0.08)",
+                border: `1px solid ${a.marketZone === "premium" ? "rgba(248,113,113,0.25)" : "rgba(0,230,118,0.25)"}`,
+              }}>
+              <span className="font-dm-mono text-[9px] font-bold uppercase tracking-wider"
+                style={{ color: a.marketZone === "premium" ? "#f87171" : "#00e676" }}>
+                {a.marketZone === "premium" ? "PREMIUM ZONE" : "DISCOUNT ZONE"}
+              </span>
+              <span className="font-dm-mono text-[9px] text-[#6b7280]">
+                — {a.marketZone === "premium" ? "shorts preferred" : "longs preferred"}
+              </span>
+            </div>
+            <SMCTooltip tipKey="zone" />
+          </div>
+        )}
+      </div>
+
+      {/* Cards */}
+      <div className="p-4 space-y-2">
+
+        {/* FVGs — free users see first one */}
+        {visibleFVG.map((f, i) => {
+          const bull = f.type?.toLowerCase().includes("bull");
+          return (
+            <SMCCard key={i}
+              badge={bull ? "BULLISH FVG" : "BEARISH FVG"}
+              badgeColor={bull ? "#00e676" : "#f87171"}
+              badgeBg={bull ? "rgba(0,230,118,0.1)" : "rgba(248,113,113,0.1)"}
+              badgeBorder={bull ? "rgba(0,230,118,0.3)" : "rgba(248,113,113,0.3)"}
+              priceRange={f.priceRange}
+              status={f.filled ? "Filled" : "Unfilled — potential price magnet"}
+              description={f.description}
+              tipKey="fvg"
+            />
+          );
+        })}
+
+        {/* Locked overlay for free users */}
+        {hasLocked && (
+          <div className="relative rounded-xl overflow-hidden">
+            <div style={{ filter: "blur(4px)", pointerEvents: "none", userSelect: "none" }} className="space-y-2">
+              {obs.slice(0, 1).map((o, i) => {
+                const bull = o.type?.toLowerCase().includes("bull");
+                return (
+                  <SMCCard key={i}
+                    badge={bull ? "BULLISH ORDER BLOCK" : "BEARISH ORDER BLOCK"}
+                    badgeColor={bull ? "#00e676" : "#f87171"}
+                    badgeBg={bull ? "rgba(0,230,118,0.1)" : "rgba(248,113,113,0.1)"}
+                    badgeBorder={bull ? "rgba(0,230,118,0.3)" : "rgba(248,113,113,0.3)"}
+                    priceRange={o.priceRange} description={o.description}
+                  />
+                );
+              })}
+              {sweeps.slice(0, 1).map((s, i) => (
+                <SMCCard key={i}
+                  badge="LIQUIDITY SWEEP" badgeColor="#fbbf24"
+                  badgeBg="rgba(251,191,36,0.1)" badgeBorder="rgba(251,191,36,0.3)"
+                  priceRange={s.price} description={s.description}
+                />
+              ))}
+              {sb.slice(0, 1).map((s, i) => (
+                <SMCCard key={i}
+                  badge="BOS / CHoCH" badgeColor="#9ca3af"
+                  badgeBg="rgba(156,163,175,0.1)" badgeBorder="rgba(156,163,175,0.3)"
+                  priceRange={s.price} description={s.description}
+                />
+              ))}
+            </div>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-5 rounded-xl"
+              style={{ background: "rgba(8,10,16,0.82)" }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <rect x="2.5" y="8" width="13" height="9" rx="2" stroke="#00e676" strokeWidth="1.2"/>
+                <path d="M5.5 8V6a3.5 3.5 0 017 0v2" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+              <p className="text-white text-xs font-bold">Pro — Full SMC Analysis</p>
+              <p className="text-[#6b7280] text-[10px] leading-snug max-w-[190px]">
+                Order blocks, liquidity sweeps, BOS/CHoCH, equal highs/lows, patterns and Fibonacci
+              </p>
+              <button onClick={upgrade}
+                className="mt-1 px-4 py-1.5 rounded-xl text-[11px] font-bold transition-all hover:-translate-y-0.5"
+                style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 14px rgba(0,230,118,0.28)" }}>
+                Upgrade to Pro
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pro-only cards */}
+        {isPro && (
+          <>
+            {obs.map((o, i) => {
+              const bull = o.type?.toLowerCase().includes("bull");
+              return (
+                <SMCCard key={i}
+                  badge={bull ? "BULLISH ORDER BLOCK" : "BEARISH ORDER BLOCK"}
+                  badgeColor={bull ? "#00e676" : "#f87171"}
+                  badgeBg={bull ? "rgba(0,230,118,0.1)" : "rgba(248,113,113,0.1)"}
+                  badgeBorder={bull ? "rgba(0,230,118,0.3)" : "rgba(248,113,113,0.3)"}
+                  priceRange={o.priceRange} description={o.description} tipKey="ob"
+                />
+              );
+            })}
+            {sweeps.map((s, i) => (
+              <SMCCard key={i}
+                badge="LIQUIDITY SWEEP" badgeColor="#fbbf24"
+                badgeBg="rgba(251,191,36,0.1)" badgeBorder="rgba(251,191,36,0.3)"
+                priceRange={s.price} description={s.description} tipKey="sweep"
+              />
+            ))}
+            {sb.map((s, i) => {
+              const isBOS  = s.type?.toUpperCase().includes("BOS");
+              const isBull = s.type?.toLowerCase().includes("bull") || s.type?.toLowerCase().includes("high");
+              const color  = isBull ? "#00e676" : isBOS ? "#f87171" : "#f59e0b";
+              const label  = s.type?.toUpperCase().includes("CHOCH") ? "CHOCH DETECTED" : isBull ? "BOS BULLISH" : "BOS BEARISH";
+              return (
+                <SMCCard key={i} badge={label} badgeColor={color}
+                  badgeBg={`${color}18`} badgeBorder={`${color}40`}
+                  priceRange={s.price} description={s.description}
+                  tipKey={isBOS ? "bos" : "choch"}
+                />
+              );
+            })}
+            {eq.map((e, i) => {
+              const isHigh = e.type?.toLowerCase().includes("high");
+              return (
+                <SMCCard key={i}
+                  badge={isHigh ? "EQUAL HIGHS" : "EQUAL LOWS"}
+                  badgeColor={isHigh ? "#f87171" : "#00e676"}
+                  badgeBg={isHigh ? "rgba(248,113,113,0.1)" : "rgba(0,230,118,0.1)"}
+                  badgeBorder={isHigh ? "rgba(248,113,113,0.3)" : "rgba(0,230,118,0.3)"}
+                  priceRange={e.price} description={e.description}
+                  tipKey={isHigh ? "eqh" : "eql"}
+                />
+              );
+            })}
+            {pats.map((p, i) => (
+              <SMCCard key={i}
+                badge={p.name?.toUpperCase() ?? "PATTERN"}
+                badgeColor="#38bdf8" badgeBg="rgba(56,189,248,0.1)" badgeBorder="rgba(56,189,248,0.3)"
+                priceRange={p.target ? `Target: ${p.target}` : undefined}
+                description={p.description} tipKey="pattern"
+              />
+            ))}
+            {fibs.length > 0 && (
+              <div className="rounded-xl p-3" style={{ background: "rgba(192,132,252,0.05)", border: "1px solid rgba(192,132,252,0.18)" }}>
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <span className="font-dm-mono text-[9px] uppercase tracking-widest font-bold text-[#c084fc]">
+                    Fibonacci Levels
+                  </span>
+                  <SMCTooltip tipKey="fib" />
+                </div>
+                <div className="space-y-1.5">
+                  {fibs.map((f, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <span className="font-dm-mono text-[10px] font-bold text-[#c084fc] w-10 flex-shrink-0">{f.level}</span>
+                      <span className="font-dm-mono text-[10px] text-[#d1d5db] flex-shrink-0">{f.price}</span>
+                      <span className="font-dm-mono text-[9px] text-[#6b7280] truncate">{f.description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Most shared setups this week ──────────────────────────────
+function MostSharedSetups() {
+  const [setups, setSetups] = useState<{ asset: string; signal: string; count: number }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/shares")
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d.setups)) setSetups(d.setups); })
+      .catch(() => {});
+  }, []);
+
+  if (setups.length === 0) return null;
+
+  return (
+    <section className="py-16 px-6">
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-8" data-animate>
+          <SectionBadge>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <circle cx="7.5" cy="2" r="1.5" stroke="currentColor" strokeWidth="1.1"/>
+              <circle cx="2" cy="5" r="1.5" stroke="currentColor" strokeWidth="1.1"/>
+              <circle cx="7.5" cy="8" r="1.5" stroke="currentColor" strokeWidth="1.1"/>
+              <path d="M3.4 4.4l2.8-1.8M3.4 5.6l2.8 1.8" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+            </svg>
+            Most Shared This Week
+          </SectionBadge>
+          <h2 className="font-bebas text-[clamp(32px,4vw,52px)] leading-none tracking-[0.03em] text-white mt-2">
+            TOP SETUPS TRADERS ARE SHARING
+          </h2>
+          <p className="text-[#6b7280] text-base mt-3 max-w-lg mx-auto">
+            The chart setups your fellow traders found most compelling this week
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-4">
+          {setups.map((s, i) => {
+            const sigColor = s.signal === "LONG" ? "#00e676" : s.signal === "SHORT" ? "#f87171" : "#9ca3af";
+            const sigBg    = s.signal === "LONG" ? "rgba(0,230,118,0.1)" : s.signal === "SHORT" ? "rgba(248,113,113,0.1)" : "rgba(156,163,175,0.1)";
+            const rank     = ["🥇", "🥈", "🥉"][i] ?? "";
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1, duration: 0.35 }}
+                className="rounded-2xl px-5 py-4 flex items-center gap-4"
+                style={{ background: "#0c0f18", border: "1px solid rgba(255,255,255,0.07)", minWidth: "220px" }}
+              >
+                <span className="text-2xl">{rank}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bebas text-xl text-white leading-none tracking-wide">{s.asset}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: sigBg, color: sigColor, border: `1px solid ${sigColor}40` }}>
+                      {s.signal}
+                    </span>
+                    <span className="font-dm-mono text-[10px] text-[#4b5563]">{s.count} share{s.count !== 1 ? "s" : ""}</span>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Main app ───────────────────────────────────────────────────
 export default function App() {
   const [file, setFile]             = useState<File | null>(null);
   const [preview, setPreview]       = useState<string | null>(null);
   const [asset, setAsset]           = useState("");
   const [selectedTF, setSelectedTF] = useState("1H");
+  const [htfBias, setHtfBias]       = useState<"BULLISH" | "BEARISH" | "UNKNOWN">("UNKNOWN");
   const [activeTab, setActiveTab]   = useState<"current" | "higher" | "highest">("current");
   const [loading, setLoading]       = useState(false);
   const [result, setResult]         = useState<MultiResult | null>(null);
@@ -1482,10 +2550,18 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [revealKey, setRevealKey]           = useState(0);
-  const [showLimitModal, setShowLimitModal] = useState(false);
-  const [usedToday, setUsedToday]           = useState(0);
-  const [clientId, setClientId]             = useState<string | null>(null);
-  const { plan } = useUserPlan();
+  const [showLimitModal, setShowLimitModal]   = useState(false);
+  const [freeUsed, setFreeUsed]               = useState(0);
+  const FREE_LIMIT = 5;
+  const [clientId, setClientId]               = useState<string | null>(null);
+  const [showExitIntent, setShowExitIntent]       = useState(false);
+  const [exitIntentFired, setExitIntentFired]     = useState(false);
+  const [showAnnualPricing, setShowAnnualPricing] = useState(false);
+  const [showWelcome, setShowWelcome]             = useState(false);
+  const [showTopBanner, setShowTopBanner]         = useState(false);
+  const { plan, isPro: isPlanPro } = useUserPlan();
+  const { user, loading: authLoading } = useAuth();
+  const isPro = isPlanPro;
   const fileRef       = useRef<HTMLInputElement>(null);
   const resultsRef    = useRef<HTMLDivElement>(null);
   const [chartBase64, setChartBase64]   = useState<string | null>(null);
@@ -1493,6 +2569,12 @@ export default function App() {
   const [journalId, setJournalId]       = useState<string | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalEvent[]>([]);
   const [showCalculator, setShowCalculator] = useState(false);
+  const [showEntryToast, setShowEntryToast] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareCount, setShareCount]         = useState<number | null>(null);
+  const [tvUrl, setTvUrl]                   = useState("");
+  const [tvImporting, setTvImporting]       = useState(false);
+  const [tvUrlError, setTvUrlError]         = useState<string | null>(null);
 
   // Init client identity + usage from localStorage
   useEffect(() => {
@@ -1504,15 +2586,9 @@ export default function App() {
     }
     setClientId(id);
 
-    // Usage counter
-    const today = new Date().toISOString().slice(0, 10);
-    const storedDate = localStorage.getItem("ciq_date");
-    if (storedDate === today) {
-      setUsedToday(parseInt(localStorage.getItem("ciq_used") || "0", 10));
-    } else {
-      localStorage.setItem("ciq_date", today);
-      localStorage.setItem("ciq_used", "0");
-    }
+    // Lifetime usage counter (cached locally, server is source of truth)
+    const storedUsed = localStorage.getItem("ciq_free_used");
+    if (storedUsed !== null) setFreeUsed(parseInt(storedUsed, 10));
 
     // Pre-fill asset from URL param (?asset=BTC/USD)
     const params = new URLSearchParams(window.location.search);
@@ -1542,6 +2618,42 @@ export default function App() {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [mobileOpen]);
+
+  // Welcome modal — fires once per device for non-logged-in visitors
+  useEffect(() => {
+    if (authLoading) return; // wait for auth to settle
+    if (user) return;        // already logged in
+    if (localStorage.getItem("ciq_welcome_shown")) return;
+    // Delay slightly so the page has rendered first
+    const t = setTimeout(() => {
+      setShowWelcome(true);
+      setShowTopBanner(true);
+      localStorage.setItem("ciq_welcome_shown", "true");
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [authLoading, user]);
+
+  // Top banner — show for non-logged-in users (persists until dismissed)
+  useEffect(() => {
+    if (authLoading) return;
+    if (user) return;
+    if (!localStorage.getItem("ciq_banner_dismissed")) {
+      setShowTopBanner(true);
+    }
+  }, [authLoading, user]);
+
+  // Exit intent — fires once for free users when mouse leaves top of viewport
+  useEffect(() => {
+    if (isPro || exitIntentFired) return;
+    const handler = (e: MouseEvent) => {
+      if (e.clientY <= 0 && !exitIntentFired) {
+        setExitIntentFired(true);
+        setShowExitIntent(true);
+      }
+    };
+    document.addEventListener("mouseleave", handler);
+    return () => document.removeEventListener("mouseleave", handler);
+  }, [isPro, exitIntentFired]);
 
   function pickFile(f: File) {
     setFile(f);
@@ -1578,6 +2690,26 @@ export default function App() {
     if (f?.type.startsWith("image/")) pickFile(f);
   }
 
+  async function handleTVImport() {
+    const url = tvUrl.trim();
+    if (!url) return;
+    setTvImporting(true);
+    setTvUrlError(null);
+    try {
+      const res = await fetch(`/api/tradingview/snapshot?url=${encodeURIComponent(url)}`);
+      if (!res.ok) throw new Error("Could not fetch image from URL");
+      const blob = await res.blob();
+      if (!blob.type.startsWith("image/")) throw new Error("URL does not point to an image");
+      const fakeName = "tradingview-chart.png";
+      const f = new File([blob], fakeName, { type: blob.type });
+      pickFile(f);
+      setTvUrl("");
+    } catch (err) {
+      setTvUrlError(err instanceof Error ? err.message : "Import failed");
+    }
+    setTvImporting(false);
+  }
+
   async function handleAnalyze() {
     if (!file) return;
     setLoading(true);
@@ -1590,6 +2722,7 @@ export default function App() {
     fd.append("file", file);
     fd.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone);
     fd.append("timeframe", selectedTF);
+    fd.append("htf_bias", htfBias);
     if (asset.trim())  fd.append("asset", asset.trim());
     if (clientId)      fd.append("client_id", clientId);
 
@@ -1603,10 +2736,9 @@ export default function App() {
       const data = await res.json();
 
       if (res.status === 429) {
-        const today = new Date().toISOString().slice(0, 10);
-        setUsedToday(3);
-        localStorage.setItem("ciq_used", "3");
-        localStorage.setItem("ciq_date", today);
+        const used = data.used ?? FREE_LIMIT;
+        setFreeUsed(used);
+        localStorage.setItem("ciq_free_used", String(used));
         setShowLimitModal(true);
         return;
       }
@@ -1616,12 +2748,23 @@ export default function App() {
         setJournalId(data.journalId ?? null);
         setRevealKey(k => k + 1);
         setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-        if (!data.usage?.isPro) {
-          const newUsed = data.usage?.used ?? usedToday + 1;
-          const today   = new Date().toISOString().slice(0, 10);
-          setUsedToday(newUsed);
-          localStorage.setItem("ciq_used", String(newUsed));
-          localStorage.setItem("ciq_date", today);
+        // Toast when entry window is open right now
+        if (isPro && data.analyses.current.entryTimeUTC) {
+          const { isNow } = getCountdownToUTC(data.analyses.current.entryTimeUTC);
+          if (isNow) setShowEntryToast(true);
+        }
+        if (!data.usage?.isPro && data.usage?.used != null) {
+          setFreeUsed(data.usage.used);
+          localStorage.setItem("ciq_free_used", String(data.usage.used));
+        }
+        // Fetch share count for this setup (non-blocking)
+        const a = asset.trim();
+        const sig = data.analyses.current.bias === "BULLISH" ? "LONG" : data.analyses.current.bias === "BEARISH" ? "SHORT" : "NEUTRAL";
+        if (a && sig) {
+          fetch(`/api/shares?asset=${encodeURIComponent(a)}&signal=${sig}`)
+            .then(r => r.json())
+            .then(d => { if (d.count != null) setShareCount(d.count); })
+            .catch(() => {});
         }
       } else {
         setError(data.error || "Analysis failed — please try again.");
@@ -1641,10 +2784,9 @@ export default function App() {
   const biasColor =
     cur?.bias === "BULLISH" ? "#00e676" :
     cur?.bias === "BEARISH" ? "#f87171" :
-    "#f59e0b";
+    "#9ca3af";
 
-  const isPro    = plan === "pro";
-  const navLinks = ["Features", "How It Works", "Pricing", "Watchlist", "Calculator", "Calendar", "Journal", "Account"];
+  const navLinks = ["Features", "How It Works", "Pricing", "Brokers", "Tools", "Watchlist", "Calculator", "Calendar", "Journal", "Account"];
 
   // Calendar urgent badge: HIGH impact event within 2 hours
   const calHasUrgent = calendarEvents.some((e) => {
@@ -1656,15 +2798,74 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden">
 
+      {/* ── WELCOME MODAL ───────────────────────────────────── */}
+      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
+
+      {/* ── TRIAL TOP BANNER ────────────────────────────────── */}
+      {!user && !isPro && showTopBanner && (
+        <TrialTopBanner onDismiss={() => { setShowTopBanner(false); localStorage.setItem("ciq_banner_dismissed", "true"); }} />
+      )}
+
       {/* ── DAILY LIMIT MODAL ───────────────────────────────── */}
       {showLimitModal && <LimitModal onClose={() => setShowLimitModal(false)} clientId={clientId} />}
+
+      {/* ── EXIT INTENT POPUP ───────────────────────────────── */}
+      {showExitIntent && <ExitIntentPopup onClose={() => setShowExitIntent(false)} />}
+
+      {/* ── ENTRY WINDOW TOAST ──────────────────────────────── */}
+      {showEntryToast && (
+        <EntryWindowToast
+          asset={asset || null}
+          signal={cur?.bias === "BULLISH" ? "LONG" : cur?.bias === "BEARISH" ? "SHORT" : "NEUTRAL"}
+          onClose={() => setShowEntryToast(false)}
+        />
+      )}
+
+      {/* ── SHARE MODAL ─────────────────────────────────────── */}
+      {showShareModal && cur && (
+        <ShareModal
+          params={{
+            asset: asset || null,
+            timeframe: result?.tfLabels.current ?? "",
+            signal: cur.bias === "BULLISH" ? "LONG" : cur.bias === "BEARISH" ? "SHORT" : "NEUTRAL",
+            grade: cur.tradeScore ?? "B",
+            entry: cur.tradeSetup?.entry ?? "N/A",
+            stopLoss: cur.tradeSetup?.stopLoss ?? "N/A",
+            takeProfit: cur.tradeSetup?.takeProfit1 ?? "N/A",
+            riskReward: cur.tradeSetup?.riskReward ?? "N/A",
+            confidence: cur.confidence,
+            summary: cur.summary ?? "",
+            chartBase64: chartBase64,
+            chartMime: chartMime,
+            isPro,
+          } satisfies ShareCardParams}
+          onClose={() => setShowShareModal(false)}
+          onShare={(platform) => {
+            // Record share in Supabase (fire-and-forget)
+            const sig = cur.bias === "BULLISH" ? "LONG" : cur.bias === "BEARISH" ? "SHORT" : "NEUTRAL";
+            fetch("/api/shares", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ asset: asset || null, signal: sig, platform }),
+            }).then(r => r.json()).then(d => {
+              if (d.success) setShareCount(c => (c ?? 0) + 1);
+            }).catch(() => {});
+          }}
+        />
+      )}
+
+      {/* ── LIVE ACTIVITY FEED ──────────────────────────────── */}
+      <LiveActivityFeed />
+
+      {/* ── MOBILE TRIAL BAR (non-logged-in) ────────────────── */}
+      {!user && !isPro && <MobileTrialBar />}
 
       {/* ── MOBILE DRAWER ───────────────────────────────────── */}
       <div className={`mobile-drawer md:hidden ${mobileOpen ? "open" : ""}`}>
         <div className="flex items-center justify-between px-6 h-16 border-b border-white/[0.06]">
           <div className="flex items-center gap-2.5">
             <LogoMark />
-            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#00e676]">AI</span></span>
           </div>
           <button onClick={() => setMobileOpen(false)} className="w-9 h-9 rounded-lg bg-white/[0.06] flex items-center justify-center">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -1693,15 +2894,30 @@ export default function App() {
           <div className="flex items-center gap-2.5">
             <LogoMark />
             <span className="font-bold text-[17px] text-white">
-              ChartIQ <span className="text-[#f5c518]">AI</span>
+              ChartIQ <span className="text-[#00e676]">AI</span>
             </span>
           </div>
           <div className="hidden md:flex items-center gap-7">
             {navLinks.map((l) => {
-              const href = l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calculator" ? "/calculator" : l === "Calendar" ? "/calendar" : `#${l.toLowerCase().replace(/ /g, "-")}`;
+              const href = l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calculator" ? "/calculator" : l === "Calendar" ? "/calendar" : l === "Brokers" ? "/brokers" : l === "Tools" ? "/tools/pine-scripts" : l === "Pricing" ? "/pricing" : `#${l.toLowerCase().replace(/ /g, "-")}`;
+              const isProLocked = !isPro && ["Journal", "Watchlist", "Calendar"].includes(l);
               return (
-                <a key={l} href={href} className="text-sm text-[#6b7280] hover:text-white transition-colors duration-150">
+                <a key={l} href={href}
+                  className="text-sm text-[#6b7280] hover:text-white transition-colors duration-150 flex items-center gap-1.5 group relative"
+                  title={isProLocked ? "Pro feature" : undefined}>
                   {l}
+                  {isProLocked && (
+                    <>
+                      <svg width="10" height="11" viewBox="0 0 10 11" fill="none" className="flex-shrink-0">
+                        <rect x="1" y="4.5" width="8" height="6" rx="1.2" stroke="#00e676" strokeWidth="1.1"/>
+                        <path d="M3 4.5V3a2 2 0 014 0v1.5" stroke="#00e676" strokeWidth="1.1" strokeLinecap="round"/>
+                      </svg>
+                      <span className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 rounded-lg text-[10px] font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                        style={{ background: "#0c0f18", border: "1px solid rgba(0,230,118,0.3)", color: "#00e676" }}>
+                        Pro feature
+                      </span>
+                    </>
+                  )}
                 </a>
               );
             })}
@@ -1717,24 +2933,29 @@ export default function App() {
             )}
             {/* Usage counter (free only) */}
             {!isPro && (
-              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.07]">
-                <div className="flex gap-[3px]">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="w-[5px] h-[5px] rounded-full transition-colors duration-300"
-                      style={{
-                        background: i < usedToday
-                          ? (usedToday >= 3 ? "#ef4444" : usedToday >= 2 ? "#f59e0b" : "#00e676")
-                          : "rgba(255,255,255,0.12)"
-                      }}
-                    />
-                  ))}
+              <div className="hidden md:flex flex-col gap-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.07] min-w-[118px]">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="font-dm-mono text-[10px] leading-none"
+                    style={{ color: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 1 ? "#f87171" : freeUsed >= FREE_LIMIT - 2 ? "#9ca3af" : "#00e676" }}>
+                    {freeUsed >= FREE_LIMIT ? "No analyses left" : freeUsed >= FREE_LIMIT - 1 ? "1 free left" : `${FREE_LIMIT - freeUsed} free left`}
+                  </span>
+                  <span className="font-dm-mono text-[9px] text-[#4b5563]">{freeUsed}/{FREE_LIMIT}</span>
                 </div>
-                <span className="font-dm-mono text-[10px] leading-none"
-                  style={{ color: usedToday >= 3 ? "#ef4444" : usedToday >= 2 ? "#f59e0b" : "#6b7280" }}>
-                  {usedToday}/3 today
-                </span>
+                <div className="w-full h-[4px] rounded-full bg-white/[0.08] overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(100, (freeUsed / FREE_LIMIT) * 100)}%`,
+                      background: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 1 ? "#f87171" : freeUsed >= FREE_LIMIT - 2 ? "#9ca3af" : "#00e676",
+                      boxShadow: freeUsed >= FREE_LIMIT ? "0 0 6px rgba(239,68,68,0.6)" : "0 0 5px rgba(0,230,118,0.4)",
+                    }}
+                  />
+                </div>
+                <span className="font-dm-mono text-[8px] text-[#4b5563] leading-none">Pro is unlimited</span>
               </div>
             )}
+            {/* Session clock */}
+            <SessionClock />
             {/* Calendar icon with urgent-event badge */}
             <a href="/calendar"
               className="hidden md:flex relative w-9 h-9 rounded-lg bg-white/[0.04] border border-white/[0.08] items-center justify-center transition-colors hover:bg-white/[0.08]"
@@ -1750,6 +2971,7 @@ export default function App() {
             <a href="#analyze" className="btn-purple px-5 py-2 text-sm hidden md:inline-flex">
               See Live Demo
             </a>
+            <AuthNavButtons className="hidden md:flex" />
             <button onClick={() => setMobileOpen(true)}
               className="md:hidden w-9 h-9 rounded-lg bg-white/[0.06] flex flex-col items-center justify-center gap-1.5">
               <span className="w-4.5 h-0.5 bg-white rounded-full block" style={{ width: "18px", height: "2px" }} />
@@ -1787,7 +3009,7 @@ export default function App() {
                 <a href="#how-it-works" className="btn-outline px-7 py-3.5 text-sm flex items-center gap-2">See it in action →</a>
               </div>
               <div className="animate-fade-up delay-400 flex flex-wrap gap-8">
-                {[{ value: "2,400+", label: "Active traders" }, { value: "<5s", label: "Analysis speed" }, { value: "3", label: "Free analyses/day" }].map((s) => (
+                {[{ value: "2,400+", label: "Active traders" }, { value: "<5s", label: "Analysis speed" }, { value: "5", label: "Free analyses" }].map((s) => (
                   <div key={s.label}>
                     <div className="font-bebas text-[32px] text-[#00e676] leading-none">{s.value}</div>
                     <div className="text-[#6b7280] text-xs tracking-wide mt-0.5">{s.label}</div>
@@ -1885,7 +3107,7 @@ export default function App() {
           <div className="text-center mb-14" data-animate>
             <SectionBadge>⚡ AI-Powered Analysis</SectionBadge>
             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-              Analyze Your Chart <span className="text-[#f5c518]">Instantly</span>
+              Analyze Your Chart <span className="text-[#00e676]">Instantly</span>
             </h2>
             <p className="text-[#6b7280] mt-4 text-lg max-w-lg mx-auto leading-relaxed">
               Upload any trading chart and get institutional-grade insights in under 10 seconds.
@@ -1973,6 +3195,34 @@ export default function App() {
                 </button>
               )}
 
+              {/* TradingView snapshot import */}
+              <div className="mt-3 rounded-xl border border-white/[0.07] p-3"
+                style={{ background: "rgba(33,150,243,0.04)" }}>
+                <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#42a5f5] mb-2">
+                  Or import TradingView chart
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={tvUrl}
+                    onChange={(e) => setTvUrl(e.target.value)}
+                    placeholder="Paste TradingView snapshot URL (.png)"
+                    className="flex-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.07] text-white text-[11px] font-dm-mono placeholder-[#4b5563] focus:outline-none focus:border-[#42a5f5]/40 transition-colors"
+                  />
+                  <button
+                    onClick={handleTVImport}
+                    disabled={!tvUrl.trim() || tvImporting}
+                    className="px-3 py-2 rounded-xl text-[11px] font-bold flex-shrink-0 transition-all hover:-translate-y-0.5 disabled:opacity-40"
+                    style={{ background: "rgba(33,150,243,0.15)", color: "#42a5f5", border: "1px solid rgba(33,150,243,0.25)" }}>
+                    {tvImporting ? "…" : "Import"}
+                  </button>
+                </div>
+                {tvUrlError && <p className="text-[#f87171] text-[10px] mt-1.5 font-dm-mono">{tvUrlError}</p>}
+                <p className="text-[#4b5563] text-[10px] mt-1.5 font-dm-mono leading-relaxed">
+                  In TradingView: camera icon → Copy link → paste here
+                </p>
+              </div>
+
               <input
                 type="text"
                 value={asset}
@@ -1980,6 +3230,62 @@ export default function App() {
                 placeholder="Asset (e.g. BTC/USD, EUR/USD, AAPL) — optional"
                 className="w-full mt-3 px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#00e676]/60 transition-colors"
               />
+
+              {/* ── HTF Bias ──────────────────────────────────── */}
+              <div className="mt-4 rounded-xl border border-white/[0.07] p-4" style={{ background: "rgba(255,255,255,0.02)" }}>
+                <p className="font-dm-mono text-[10px] uppercase tracking-[0.14em] text-[#6b7280] mb-3">What is the higher timeframe trend?</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["BULLISH", "BEARISH", "UNKNOWN"] as const).map((b) => {
+                    const active = htfBias === b;
+                    const activeStyle = b === "BULLISH"
+                      ? { background: "rgba(0,230,118,0.14)", color: "#00e676", border: "1px solid rgba(0,230,118,0.35)" }
+                      : b === "BEARISH"
+                      ? { background: "rgba(248,113,113,0.14)", color: "#f87171", border: "1px solid rgba(248,113,113,0.35)" }
+                      : { background: "rgba(156,163,175,0.1)", color: "#9ca3af", border: "1px solid rgba(156,163,175,0.3)" };
+                    const idleStyle = { background: "transparent", color: "#4b5563", border: "1px solid rgba(255,255,255,0.07)" };
+                    return (
+                      <button key={b} type="button" onClick={() => setHtfBias(b)}
+                        className="py-2.5 rounded-xl font-dm-mono text-xs font-bold transition-all duration-150 hover:opacity-90"
+                        style={active ? activeStyle : idleStyle}>
+                        {b === "BULLISH" ? "↑ Bullish" : b === "BEARISH" ? "↓ Bearish" : "? Unknown"}
+                      </button>
+                    );
+                  })}
+                </div>
+                {htfBias !== "UNKNOWN" && (
+                  <p className="font-dm-mono text-[10px] mt-2.5 text-center" style={{ color: htfBias === "BULLISH" ? "rgba(0,230,118,0.6)" : "rgba(248,113,113,0.6)" }}>
+                    {htfBias === "BULLISH" ? "Only LONG setups will be prioritised" : "Only SHORT setups will be prioritised"}
+                  </p>
+                )}
+              </div>
+
+              {/* Free usage progress bar */}
+              {!isPro && (
+                <div className="mt-3 rounded-xl border border-white/[0.06] px-4 py-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-dm-mono text-[10px] text-[#6b7280]">
+                      {freeUsed >= FREE_LIMIT
+                        ? "Free analyses used up — upgrade to continue"
+                        : freeUsed >= FREE_LIMIT - 1
+                        ? "1 free analysis remaining"
+                        : freeUsed >= FREE_LIMIT - 2
+                        ? "Using up fast — upgrade for unlimited"
+                        : `${freeUsed} of ${FREE_LIMIT} free analyses used`}
+                    </span>
+                    <span className="font-dm-mono text-[10px]" style={{ color: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 2 ? "#f87171" : "#6b7280" }}>
+                      {freeUsed}/{FREE_LIMIT}
+                    </span>
+                  </div>
+                  <div className="w-full h-[5px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                    <div className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, (freeUsed / FREE_LIMIT) * 100)}%`,
+                        background: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 2 ? "#f87171" : "#00e676",
+                        boxShadow: freeUsed >= FREE_LIMIT ? "0 0 6px rgba(239,68,68,0.5)" : freeUsed >= FREE_LIMIT - 2 ? "0 0 5px rgba(248,113,113,0.4)" : "0 0 6px rgba(0,230,118,0.4)",
+                      }} />
+                  </div>
+                </div>
+              )}
 
               <button onClick={handleAnalyze} disabled={!file || loading}
                 className="btn-yellow w-full py-3.5 mt-3 text-sm flex items-center justify-center gap-2">
@@ -2027,16 +3333,34 @@ export default function App() {
                   <p className="text-[#6b7280] text-sm mt-0.5">
                     {result ? `${cur?.bias} · ${result.tfLabels.current} · ${cur?.confidence}% confidence` : "Your AI-powered insights will appear here"}
                   </p>
+                  {result && shareCount != null && shareCount > 0 && (
+                    <p className="font-dm-mono text-[10px] text-[#4b5563] mt-0.5">
+                      <span className="text-[#00e676]">{shareCount}</span> trader{shareCount !== 1 ? "s" : ""} shared this setup this week
+                    </p>
+                  )}
                 </div>
                 {result && (
-                  <button onClick={clearFile}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-[#9ca3af] hover:text-white text-xs font-medium transition-all duration-150 flex-shrink-0">
-                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                      <path d="M10 5.5A4.5 4.5 0 111 5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                      <path d="M10 2.5V5.5H7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    New Analysis
-                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={() => setShowShareModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 hover:-translate-y-0.5"
+                      style={{ background: "rgba(0,230,118,0.1)", border: "1px solid rgba(0,230,118,0.3)", color: "#00e676" }}>
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                        <circle cx="8.5" cy="2.5" r="1.5" stroke="currentColor" strokeWidth="1.1"/>
+                        <circle cx="2.5" cy="5.5" r="1.5" stroke="currentColor" strokeWidth="1.1"/>
+                        <circle cx="8.5" cy="8.5" r="1.5" stroke="currentColor" strokeWidth="1.1"/>
+                        <path d="M4 4.8l3-1.8M4 6.2l3 1.8" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+                      </svg>
+                      Share
+                    </button>
+                    <button onClick={clearFile}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-[#9ca3af] hover:text-white text-xs font-medium transition-all duration-150 flex-shrink-0">
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                        <path d="M10 5.5A4.5 4.5 0 111 5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                        <path d="M10 2.5V5.5H7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      New
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -2087,7 +3411,7 @@ export default function App() {
                     {(["current", "higher", "highest"] as const).map((tab) => {
                       const tf    = result.tfLabels[tab];
                       const bias  = result.analyses[tab]?.bias;
-                      const bc    = bias === "BULLISH" ? "#00e676" : bias === "BEARISH" ? "#f87171" : "#f59e0b";
+                      const bc    = bias === "BULLISH" ? "#00e676" : bias === "BEARISH" ? "#f87171" : "#9ca3af";
                       const label = tab === "current" ? tf : tab === "higher" ? `${tf} ctx` : `${tf} bias`;
                       const isActive = activeTab === tab;
                       const isLocked = !isPro && tab !== "current";
@@ -2155,7 +3479,20 @@ export default function App() {
                         </motion.div>
 
                         {/* Trade Score — Pro only */}
-                        {isPro && a.tradeScore && <TradeScore grade={a.tradeScore} />}
+                        {a.tradeScore && (
+                          isPro ? <TradeScore grade={a.tradeScore} /> : (
+                            <div className="relative rounded-2xl overflow-hidden">
+                              <div style={{ filter: "blur(6px)", pointerEvents: "none", userSelect: "none" }}>
+                                <TradeScore grade={a.tradeScore} />
+                              </div>
+                              <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-2xl"
+                                style={{ background: "rgba(8,10,16,0.75)" }}>
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="6" width="10" height="7" rx="1.5" stroke="#00e676" strokeWidth="1.2"/><path d="M4.5 6V4.5a2.5 2.5 0 015 0V6" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                                <span className="text-[#00e676] text-xs font-bold">Pro — Trade Grade</span>
+                              </div>
+                            </div>
+                          )
+                        )}
 
                         <motion.div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] py-6 flex justify-center"
                           initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
@@ -2181,6 +3518,40 @@ export default function App() {
                             </motion.div>
                           ))}
                         </motion.div>
+                        {/* Annotated Chart */}
+                        <AnnotatedChart
+                          chartBase64={chartBase64}
+                          chartMime={chartMime}
+                          smc={{
+                            fvg:             a.fvg,
+                            liquiditySweeps: a.liquiditySweeps,
+                            orderBlocks:     a.orderBlocks,
+                            structureBreaks: a.structureBreaks,
+                            equalLevels:     a.equalLevels,
+                            marketZone:      a.marketZone,
+                            patterns:        a.patterns,
+                            smcFibonacci:    a.smcFibonacci,
+                            smc_summary:     a.smc_summary,
+                          } as SMCData}
+                          entry={a.tradeSetup?.entry ?? ""}
+                          stopLoss={a.tradeSetup?.stopLoss ?? ""}
+                          takeProfit={a.tradeSetup?.takeProfit1 ?? ""}
+                          isPro={isPro}
+                          clientId={clientId}
+                        />
+
+                        {/* Smart Entry Timer */}
+                        {(a.entrySession || a.entryTimeUTC) && (
+                          <EntryTimerWidget
+                            entrySession={a.entrySession ?? "Market Open"}
+                            entryTimeUTC={a.entryTimeUTC ?? "13:00"}
+                            entryRationale={a.entryRationale}
+                            waitForConfirmation={a.waitForConfirmation}
+                            isPro={isPro}
+                            clientId={clientId}
+                          />
+                        )}
+
                         <motion.div className="grid grid-cols-2 gap-3"
                           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 0.82, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
@@ -2210,7 +3581,18 @@ export default function App() {
                         </motion.div>
                         {/* Confluence checklist */}
                         {a.confluenceChecks && a.confluenceChecks.length > 0 && (
-                          <ConfluerenceChecklist checks={a.confluenceChecks} />
+                          isPro ? <ConfluerenceChecklist checks={a.confluenceChecks} /> : (
+                            <div className="relative rounded-2xl overflow-hidden">
+                              <div style={{ filter: "blur(5px)", pointerEvents: "none", userSelect: "none" }}>
+                                <ConfluerenceChecklist checks={a.confluenceChecks} />
+                              </div>
+                              <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-2xl"
+                                style={{ background: "rgba(8,10,16,0.75)" }}>
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="6" width="10" height="7" rx="1.5" stroke="#00e676" strokeWidth="1.2"/><path d="M4.5 6V4.5a2.5 2.5 0 015 0V6" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                                <span className="text-[#00e676] text-xs font-bold">Pro — Confluence Checklist</span>
+                              </div>
+                            </div>
+                          )
                         )}
 
                         <motion.div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-4"
@@ -2230,13 +3612,53 @@ export default function App() {
                           </motion.div>
                         )}
                         {a.warnings?.length > 0 && (
-                          <motion.div className="rounded-2xl bg-[#fbbf24]/[0.05] border border-[#fbbf24]/15 p-4"
-                            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 1.48, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
-                            <p className="text-[#fbbf24] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
-                            {a.warnings.map((w, i) => <p key={i} className="text-[#fcd34d] text-sm mt-1">· {w}</p>)}
-                          </motion.div>
+                          isPro ? (
+                            <motion.div className="rounded-2xl bg-[#f87171]/[0.05] border border-[#f87171]/15 p-4"
+                              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 1.48, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
+                              <p className="text-[#f87171] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
+                              {a.warnings.map((w, i) => <p key={i} className="text-[#fca5a5] text-sm mt-1">· {w}</p>)}
+                            </motion.div>
+                          ) : (
+                            <div className="relative rounded-2xl overflow-hidden">
+                              <div className="rounded-2xl bg-[#f87171]/[0.05] border border-[#f87171]/15 p-4"
+                                style={{ filter: "blur(5px)", pointerEvents: "none", userSelect: "none" }}>
+                                <p className="text-[#f87171] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
+                                {a.warnings.slice(0, 2).map((w, i) => <p key={i} className="text-[#fca5a5] text-sm mt-1">· {w}</p>)}
+                              </div>
+                              <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-2xl"
+                                style={{ background: "rgba(8,10,16,0.75)" }}>
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="6" width="10" height="7" rx="1.5" stroke="#00e676" strokeWidth="1.2"/><path d="M4.5 6V4.5a2.5 2.5 0 015 0V6" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                                <span className="text-[#00e676] text-xs font-bold">Pro — Risk Warnings</span>
+                              </div>
+                            </div>
+                          )
                         )}
+
+                        {/* SMC Analysis */}
+                        <SMCSection a={a} isPro={isPro} clientId={clientId} />
+
+                        {/* Pine Script Export */}
+                        <PineScriptExport
+                          asset={asset}
+                          timeframe={a.timeframe}
+                          signal={a.bias === "BULLISH" ? "LONG" : a.bias === "BEARISH" ? "SHORT" : "NEUTRAL"}
+                          entry={a.tradeSetup?.entry}
+                          stopLoss={a.tradeSetup?.stopLoss}
+                          takeProfit1={a.tradeSetup?.takeProfit1}
+                          confidence={a.confidence}
+                          isPro={isPro}
+                        />
+
+                        {/* MT Trade Setup */}
+                        <MTTradeSetup
+                          asset={asset}
+                          signal={a.bias === "BULLISH" ? "LONG" : "SHORT"}
+                          entry={a.tradeSetup?.entry}
+                          stopLoss={a.tradeSetup?.stopLoss}
+                          takeProfit={a.tradeSetup?.takeProfit1}
+                          isPro={isPro}
+                        />
 
                         {/* Pro deep analysis — Pro only */}
                         {isPro && <ProDeepAnalysis a={a} />}
@@ -2250,6 +3672,45 @@ export default function App() {
                             }
                           }} />
                         )}
+
+                        {/* Share CTA — bottom of analysis */}
+                        <motion.div
+                          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 2.0, duration: 0.4 }}
+                          className="rounded-2xl p-5 text-center"
+                          style={{ background: "rgba(0,230,118,0.04)", border: "1px solid rgba(0,230,118,0.18)" }}
+                        >
+                          <div className="flex items-center justify-center gap-2 mb-2">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                              <circle cx="11" cy="3" r="2" stroke="#00e676" strokeWidth="1.2"/>
+                              <circle cx="3" cy="7" r="2" stroke="#00e676" strokeWidth="1.2"/>
+                              <circle cx="11" cy="11" r="2" stroke="#00e676" strokeWidth="1.2"/>
+                              <path d="M5 6.1l4-2.2M5 7.9l4 2.2" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round"/>
+                            </svg>
+                            <p className="font-dm-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[#00e676]">
+                              Share This Setup
+                            </p>
+                          </div>
+                          <p className="text-[#6b7280] text-xs mb-4 leading-relaxed">
+                            Found a great setup? Share a branded card with your trading community.
+                            {shareCount != null && shareCount > 0 && (
+                              <span className="text-[#9ca3af]"> · {shareCount} trader{shareCount !== 1 ? "s" : ""} already shared this one.</span>
+                            )}
+                          </p>
+                          <button
+                            onClick={() => setShowShareModal(true)}
+                            className="w-full py-3.5 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5 active:scale-[0.98] flex items-center justify-center gap-2"
+                            style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 20px rgba(0,230,118,0.28)" }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                              <circle cx="11" cy="3" r="2" stroke="currentColor" strokeWidth="1.3"/>
+                              <circle cx="3" cy="7" r="2" stroke="currentColor" strokeWidth="1.3"/>
+                              <circle cx="11" cy="11" r="2" stroke="currentColor" strokeWidth="1.3"/>
+                              <path d="M5 6.1l4-2.2M5 7.9l4 2.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                            </svg>
+                            Share — Download, X, Discord
+                          </button>
+                        </motion.div>
                       </div>
                     );
                   })()}
@@ -2258,7 +3719,7 @@ export default function App() {
                   {(activeTab === "higher" || activeTab === "highest") && (() => {
                     const a  = result.analyses[activeTab];
                     const tf = result.tfLabels[activeTab];
-                    const bc = a.bias === "BULLISH" ? "#00e676" : a.bias === "BEARISH" ? "#f87171" : "#f59e0b";
+                    const bc = a.bias === "BULLISH" ? "#00e676" : a.bias === "BEARISH" ? "#f87171" : "#9ca3af";
                     const title    = activeTab === "higher" ? "Higher Timeframe Context" : "Macro Bias";
                     const subtitle = activeTab === "higher" ? "Trend direction & key zones" : "Overall market direction";
                     return (
@@ -2320,9 +3781,9 @@ export default function App() {
                             </div>
                           )}
                           {a.warnings?.length > 0 && (
-                            <div className="rounded-2xl bg-[#fbbf24]/[0.05] border border-[#fbbf24]/15 p-4">
-                              <p className="text-[#fbbf24] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
-                              {a.warnings.map((w, i) => <p key={i} className="text-[#fcd34d] text-sm mt-1">· {w}</p>)}
+                            <div className="rounded-2xl bg-[#f87171]/[0.05] border border-[#f87171]/15 p-4">
+                              <p className="text-[#f87171] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">⚠ Risk Warnings</p>
+                              {a.warnings.map((w, i) => <p key={i} className="text-[#fca5a5] text-sm mt-1">· {w}</p>)}
                             </div>
                           )}
                         </div>
@@ -2389,113 +3850,323 @@ export default function App() {
       {/* ── FEATURES ────────────────────────────────────────── */}
       <section id="features" className="py-24 px-6">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-14" data-animate>
-            <SectionBadge>POWERFUL FEATURES</SectionBadge>
-            <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-              Everything You Need to <span className="text-[#f5c518]">Trade Smarter</span>
+
+          {/* Header */}
+          <div className="text-center mb-16" data-animate>
+            <SectionBadge>EVERYTHING YOU NEED</SectionBadge>
+            <h2 className="font-bebas text-[clamp(40px,5vw,64px)] leading-none tracking-[0.03em] text-white mt-3 mb-4">
+              BUILT FOR SERIOUS TRADERS
             </h2>
-            <p className="text-[#6b7280] mt-4 text-lg max-w-lg mx-auto">
-              Eight tools. One platform. Every edge you need.
+            <p className="text-[#6b7280] text-lg max-w-xl mx-auto leading-relaxed">
+              Every feature designed to help you find better trades, manage risk, and track your performance
             </p>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
-            {[
-              { emoji: "📊", title: "AI Chart Analysis",        desc: "Instant signal detection with entry, SL, TP and R:R — analysed in under 5 seconds.",                                   bg: "rgba(0,230,118,0.1)",   delay: "1" },
-              { emoji: "🎯", title: "Confidence Score",         desc: "0–100 score showing exactly how strong or weak the setup is before you risk a penny.",                                  bg: "rgba(245,197,24,0.1)",  delay: "2" },
-              { emoji: "📓", title: "Trade Journal",            desc: "Every analysis auto-saved. Track wins, losses and win rate over time without lifting a finger.",                        bg: "rgba(74,222,128,0.1)",  delay: "3" },
-              { emoji: "📈", title: "Multi-Timeframe Analysis", desc: "See confluence across current, higher and highest timeframes so you never trade against the trend. Pro feature.",      bg: "rgba(124,58,237,0.1)",  delay: "4" },
-              { emoji: "📅", title: "Economic Calendar",        desc: "High-impact news alerts built in. Never trade into NFP, CPI or FOMC releases blindly again.",                          bg: "rgba(56,189,248,0.1)",  delay: "5" },
-              { emoji: "🧮", title: "Risk Calculator",          desc: "Input your balance and risk %. Get your exact position size and potential profit or loss instantly.",                   bg: "rgba(251,146,60,0.1)",  delay: "6" },
-              { emoji: "🔔", title: "Watchlist & Alerts",       desc: "Save your favourite pairs and get email alerts the moment a signal fires on your watchlist.",                          bg: "rgba(167,139,250,0.1)", delay: "7" },
-              { emoji: "💬", title: "Follow-up AI Chat",        desc: "Ask Claude anything about your chart after the analysis — unlimited questions on Pro.",                                bg: "rgba(248,113,113,0.1)", delay: "8" },
-            ].map((f) => (
-              <div key={f.title} className="card-dark card-lift p-6" data-animate data-delay={f.delay}>
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-[22px] mb-4" style={{ background: f.bg }}>{f.emoji}</div>
-                <h3 className="font-bold text-white mb-2">{f.title}</h3>
-                <p className="text-[#6b7280] text-sm leading-relaxed">{f.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* ── FEATURES SHOWCASE ───────────────────────────────── */}
-      <section className="py-20 px-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-3 gap-6">
+          {/* Cards grid */}
+          <div className="grid md:grid-cols-2 gap-6">
 
-            {/* 1 — Confidence meter */}
-            <div className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay="1">
+            {/* ── FEATURE 1 — AI CHART ANALYSIS ─────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="1">
               <div>
-                <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#00e676] font-semibold mb-2">KNOW YOUR EDGE</p>
-                <h3 className="text-xl font-bold text-white mb-2">Confidence score on every setup</h3>
-                <p className="text-[#6b7280] text-sm leading-relaxed">Never trade a weak signal again. The AI scores every setup from 0–100 so you know exactly when to pull the trigger.</p>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(107,114,128,0.15)", color: "#9ca3af", border: "1px solid rgba(107,114,128,0.2)" }}>FREE</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Instant AI Chart Analysis</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">Drop any chart screenshot and get a complete trade plan in under 5 seconds. Works with any asset, any timeframe, any platform.</p>
+                <ul className="space-y-1.5">
+                  {["Entry, stop loss & take profit", "Signal direction: LONG or SHORT", "Works on any asset or platform"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <div className="rounded-xl p-5 flex flex-col items-center gap-3 mt-auto"
-                style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.15)" }}>
+              <div className="rounded-xl border border-[#00e676]/10 p-4" style={{ background: "#080a10" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280]">XAU/USD · 1H</p>
+                    <p className="font-bebas text-lg text-white tracking-wide">AI Analysis</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-lg" style={{ background: "rgba(248,113,113,0.12)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)" }}>SHORT</span>
+                    <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-lg" style={{ background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>A+</span>
+                  </div>
+                </div>
+                <div className="space-y-1.5 mb-3">
+                  {[{ label: "Entry", value: "3,293", color: "#e2e8f0" }, { label: "Stop Loss", value: "3,302", color: "#f87171" }, { label: "Take Profit", value: "3,256", color: "#00e676" }].map((r) => (
+                    <div key={r.label} className="flex justify-between items-center px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+                      <span className="font-dm-mono text-[10px] text-[#6b7280]">{r.label}</span>
+                      <span className="font-dm-mono text-[11px] font-bold" style={{ color: r.color }}>{r.value}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-end gap-1 h-8 px-1">
+                  {[40, 55, 35, 70, 45, 80, 60, 75, 50, 85, 65, 55].map((h, i) => (
+                    <div key={i} className="flex-1 rounded-sm" style={{ height: `${h}%`, background: i >= 9 ? "rgba(248,113,113,0.45)" : "rgba(0,230,118,0.22)" }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── FEATURE 2 — CONFIDENCE SCORE ───────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="2">
+              <div>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(107,114,128,0.15)", color: "#9ca3af", border: "1px solid rgba(107,114,128,0.2)" }}>FREE</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Confidence Score & Trade Grade</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">Never enter a weak setup again. Every analysis is scored 0–100 and graded A+ to D based on how many factors align. Only take A and B grade trades.</p>
+                <ul className="space-y-1.5">
+                  {["0–100 confidence score on every setup", "A+ to D letter grade", "Only take A and B grade trades"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-[#00e676]/10 p-5 flex flex-col items-center gap-3" style={{ background: "#080a10" }}>
                 <div className="relative w-28 h-28">
                   <svg viewBox="0 0 100 100" width="112" height="112">
-                    <circle cx="50" cy="50" r="36" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="6" strokeLinecap="round"
-                      strokeDasharray={`${2*Math.PI*36*240/360} ${2*Math.PI*36*(1-240/360)}`} transform="rotate(150 50 50)" />
-                    <circle cx="50" cy="50" r="36" fill="none" stroke="#00e676" strokeWidth="6" strokeLinecap="round"
-                      strokeDasharray={`${2*Math.PI*36*240/360*0.84} ${2*Math.PI*36*(1-0.84*240/360)}`} transform="rotate(150 50 50)"
-                      style={{ filter: "drop-shadow(0 0 7px rgba(0,230,118,0.6))" }} />
-                    <text x="50" y="55" textAnchor="middle" fill="white" fontSize="26" style={{ fontFamily: "var(--font-bebas), Impact, sans-serif" }}>84</text>
+                    <circle cx="50" cy="50" r="36" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="7" strokeLinecap="round"
+                      strokeDasharray="150.8 75.4" transform="rotate(150 50 50)" />
+                    <circle cx="50" cy="50" r="36" fill="none" stroke="#00e676" strokeWidth="7" strokeLinecap="round"
+                      strokeDasharray="131.2 95" transform="rotate(150 50 50)"
+                      style={{ filter: "drop-shadow(0 0 8px rgba(0,230,118,0.7))" }} />
+                    <text x="50" y="50" textAnchor="middle" dominantBaseline="middle" fill="white" fontSize="24"
+                      style={{ fontFamily: "var(--font-bebas), Impact, sans-serif" }}>87</text>
                   </svg>
                 </div>
-                <p className="font-dm-mono text-xs text-[#00e676] font-semibold">Strong setup — high confidence</p>
+                <span className="font-dm-mono text-xs font-bold px-3 py-1 rounded-full" style={{ background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>Grade A+</span>
+                <div className="flex gap-2 flex-wrap justify-center">
+                  {["Trend ✓", "Volume ✓", "Structure ✓"].map((f) => (
+                    <span key={f} className="font-dm-mono text-[10px] px-2.5 py-1 rounded-full" style={{ background: "rgba(0,230,118,0.07)", color: "#4ade80", border: "1px solid rgba(0,230,118,0.15)" }}>{f}</span>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* 2 — Watchlist */}
-            <div className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay="2">
+            {/* ── FEATURE 3 — TRADE JOURNAL ──────────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="3">
               <div>
-                <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#f59e0b] font-semibold mb-2">NEVER MISS A SETUP</p>
-                <h3 className="text-xl font-bold text-white mb-2">Email alerts when signals fire</h3>
-                <p className="text-[#6b7280] text-sm leading-relaxed">Add pairs to your watchlist and get alerted the moment the AI spots a trade meeting your criteria.</p>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>PRO</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Automatic Trade Journal</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">Every analysis is automatically saved. Track your win rate, best performing assets, and see exactly where you are making and losing money.</p>
+                <ul className="space-y-1.5">
+                  {["Win rate & P&L tracking", "Best and worst performing assets", "Performance trends over time"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <div className="space-y-2.5 mt-auto">
-                {[
-                  { pair: "EUR/USD", signal: "LONG",  conf: 78, color: "#00e676" },
-                  { pair: "BTC/USD", signal: "LONG",  conf: 84, color: "#00e676" },
-                  { pair: "GBP/JPY", signal: "SHORT", conf: 71, color: "#f87171" },
-                ].map((w) => (
-                  <div key={w.pair} className="flex items-center justify-between px-4 py-3 rounded-xl"
-                    style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                    <span className="font-dm-mono text-sm font-bold text-white">{w.pair}</span>
-                    <div className="flex items-center gap-2.5">
-                      <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded-lg"
-                        style={{ background: `${w.color}15`, color: w.color, border: `1px solid ${w.color}30` }}>{w.signal}</span>
-                      <span className="font-dm-mono text-[11px] text-[#6b7280]">{w.conf}%</span>
+              <div className="rounded-xl border border-[#00e676]/10 p-4" style={{ background: "#080a10" }}>
+                <div className="flex justify-between items-center gap-2 mb-3 pb-3 border-b border-white/[0.05]">
+                  {[{ v: "68%", l: "Win Rate" }, { v: "47", l: "Trades" }, { v: "1:2.3", l: "Avg R:R" }].map((s) => (
+                    <div key={s.l} className="text-center">
+                      <div className="font-bebas text-xl text-[#00e676] leading-none">{s.v}</div>
+                      <div className="font-dm-mono text-[9px] text-[#6b7280] mt-0.5">{s.l}</div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 3 — Journal */}
-            <div className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay="3">
-              <div>
-                <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#c084fc] font-semibold mb-2">TRACK EVERY TRADE</p>
-                <h3 className="text-xl font-bold text-white mb-2">Auto-saved journal with win rate</h3>
-                <p className="text-[#6b7280] text-sm leading-relaxed">Every analysis lands in your journal automatically. Mark outcomes, add notes, and watch your edge compound.</p>
-              </div>
-              <div className="rounded-xl p-4 mt-auto" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                <div className="flex justify-between items-center mb-4">
-                  <p className="font-dm-mono text-[10px] uppercase tracking-widest text-[#6b7280]">Win Rate</p>
-                  <span className="font-bebas text-2xl text-[#00e676]">68%</span>
+                  ))}
                 </div>
                 <div className="space-y-2">
                   {[
-                    { asset: "EUR/USD", outcome: "WIN",  color: "#00e676" },
-                    { asset: "BTC/USD", outcome: "WIN",  color: "#00e676" },
-                    { asset: "AAPL",    outcome: "LOSS", color: "#f87171" },
-                  ].map((j) => (
-                    <div key={j.asset} className="flex justify-between items-center text-xs">
-                      <span className="font-dm-mono text-[#9ca3af]">{j.asset}</span>
-                      <span className="font-dm-mono font-bold" style={{ color: j.color }}>{j.outcome}</span>
+                    { pair: "XAU/USD", dir: "SHORT", out: "WIN",  dc: "#f87171", oc: "#00e676" },
+                    { pair: "BTC/USD", dir: "LONG",  out: "WIN",  dc: "#00e676", oc: "#00e676" },
+                    { pair: "EUR/USD", dir: "SHORT", out: "LOSS", dc: "#f87171", oc: "#f87171" },
+                  ].map((row) => (
+                    <div key={row.pair} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+                      <span className="font-dm-mono text-[11px] font-bold text-white">{row.pair}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-dm-mono text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${row.dc}18`, color: row.dc }}>{row.dir}</span>
+                        <span className="font-dm-mono text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${row.oc}18`, color: row.oc }}>{row.out}</span>
+                      </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── FEATURE 4 — MULTI-TIMEFRAME ────────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="4">
+              <div>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>PRO</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Multi-Timeframe Confluence</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">See what the higher timeframes say before entering. Get analysis on your current timeframe plus the two above it. Only trade when all timeframes agree.</p>
+                <ul className="space-y-1.5">
+                  {["Analysis on 3 timeframes at once", "Confluence score and summary", "Filters out low-probability setups"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-[#00e676]/10 p-4" style={{ background: "#080a10" }}>
+                <div className="flex gap-2 mb-4">
+                  {["5m", "1H", "4H"].map((tf, i) => (
+                    <button key={tf} className="font-dm-mono text-[11px] font-bold px-3 py-1.5 rounded-lg transition-colors"
+                      style={i === 1 ? { background: "rgba(0,230,118,0.15)", color: "#00e676", border: "1px solid rgba(0,230,118,0.3)" } : { background: "rgba(255,255,255,0.04)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.07)" }}>{tf}</button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg" style={{ background: "rgba(0,230,118,0.07)", border: "1px solid rgba(0,230,118,0.15)" }}>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 6l3 3L10.5 1.5" stroke="#00e676" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <span className="font-dm-mono text-[11px] font-bold text-[#00e676]">3/3 Bullish Confluence</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  {["5m · LONG", "1H · LONG", "4H · LONG"].map((tf) => (
+                    <div key={tf} className="text-center py-2 rounded-lg font-dm-mono text-[10px] font-bold" style={{ background: "rgba(0,230,118,0.08)", color: "#00e676", border: "1px solid rgba(0,230,118,0.15)" }}>{tf}</div>
+                  ))}
+                </div>
+                <p className="font-dm-mono text-[10px] text-center text-[#4b5563]">All timeframes aligned ✓</p>
+              </div>
+            </div>
+
+            {/* ── FEATURE 5 — ECONOMIC CALENDAR ──────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="5">
+              <div>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>PRO</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Economic Calendar & News Alerts</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">Never trade blindly into high impact news again. See upcoming NFP, CPI, and Fed meetings directly in the app with warnings on your analysis when news is nearby.</p>
+                <ul className="space-y-1.5">
+                  {["High-impact event warnings on analysis", "Real-time countdown to next event", "Colour-coded by impact level"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-[#00e676]/10 p-4" style={{ background: "#080a10" }}>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <span className="font-dm-mono text-[10px] font-bold px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(248,113,113,0.12)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)" }}>🔴 NFP · in 45min</span>
+                  <span className="font-dm-mono text-[10px] font-bold px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(156,163,175,0.1)", color: "#9ca3af", border: "1px solid rgba(156,163,175,0.25)" }}>⚪ CPI · in 3h</span>
+                  <span className="font-dm-mono text-[10px] font-bold px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>🟢 FOMC · in 2d</span>
+                </div>
+                <div className="flex items-start gap-2.5 px-3 py-3 rounded-lg" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)" }}>
+                  <span className="text-sm mt-0.5 flex-shrink-0">⚠️</span>
+                  <p className="font-dm-mono text-[10px] text-[#fca5a5] leading-relaxed">High impact news in 45 minutes — trade with caution</p>
+                </div>
+              </div>
+            </div>
+
+            {/* ── FEATURE 6 — RISK CALCULATOR ────────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="6">
+              <div>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(107,114,128,0.15)", color: "#9ca3af", border: "1px solid rgba(107,114,128,0.2)" }}>FREE</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Position Size Calculator</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">Input your account balance and risk percentage and get your exact position size, lot size, and potential profit or loss instantly. Never risk more than you plan to.</p>
+                <ul className="space-y-1.5">
+                  {["Exact lot size for your account", "Risk amount in £ or $", "Potential profit calculated instantly"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-[#00e676]/10 p-4" style={{ background: "#080a10" }}>
+                <div className="space-y-2 mb-3">
+                  <div className="flex justify-between items-center px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+                    <span className="font-dm-mono text-[10px] text-[#6b7280]">Balance</span>
+                    <span className="font-dm-mono text-[11px] font-bold text-white">£10,000</span>
+                  </div>
+                  <div className="flex justify-between items-center px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+                    <span className="font-dm-mono text-[10px] text-[#6b7280]">Risk %</span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+                        <div className="h-full rounded-full" style={{ width: "10%", background: "#00e676" }} />
+                      </div>
+                      <span className="font-dm-mono text-[11px] font-bold text-[#00e676]">1%</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="h-px mb-3" style={{ background: "rgba(255,255,255,0.05)" }} />
+                <div className="space-y-1.5">
+                  {[
+                    { l: "Risk amount",     v: "£100",      c: "#e2e8f0" },
+                    { l: "Position size",   v: "0.38 lots", c: "#e2e8f0" },
+                    { l: "Potential profit", v: "£245",     c: "#00e676" },
+                    { l: "Potential loss",  v: "£100",      c: "#f87171" },
+                  ].map((r) => (
+                    <div key={r.l} className="flex justify-between items-center">
+                      <span className="font-dm-mono text-[10px] text-[#6b7280]">{r.l}</span>
+                      <span className="font-dm-mono text-[11px] font-bold" style={{ color: r.c }}>{r.v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── FEATURE 7 — WATCHLIST & ALERTS ─────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="7">
+              <div>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>PRO</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Watchlist & Email Alerts</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">Save your favourite pairs and get email alerts the moment a high confidence signal fires. Never miss a setup on the pairs you trade most.</p>
+                <ul className="space-y-1.5">
+                  {["Unlimited watchlist pairs", "Email alerts on high-confidence signals", "Alert threshold you control"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-[#00e676]/10 p-4" style={{ background: "#080a10" }}>
+                <div className="space-y-2.5">
+                  {[
+                    { pair: "XAU/USD", dir: "SHORT",   conf: 87, alert: true,  dc: "#f87171" },
+                    { pair: "BTC/USD", dir: "LONG",    conf: 91, alert: true,  dc: "#00e676" },
+                    { pair: "EUR/USD", dir: "NEUTRAL", conf: 52, alert: false, dc: "#6b7280" },
+                  ].map((w) => (
+                    <div key={w.pair} className="flex items-center justify-between px-3 py-2.5 rounded-xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-dm-mono text-[11px] font-bold text-white">{w.pair}</span>
+                        <span className="font-dm-mono text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${w.dc}18`, color: w.dc }}>{w.dir}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-dm-mono text-[11px] font-bold" style={{ color: w.conf >= 75 ? "#00e676" : "#6b7280" }}>{w.conf}%</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill={w.alert ? "#00e676" : "#374151"}><path d="M12 2a7 7 0 0 1 7 7c0 5.25 2 6.5 2 9H3c0-2.5 2-3.75 2-9a7 7 0 0 1 7-7zm0 20a2 2 0 0 1-2-2h4a2 2 0 0 1-2 2z" /></svg>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── FEATURE 8 — AI CHAT ────────────────────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#00e676]/25 transition-colors duration-300" style={{ background: "#0d1310" }} data-animate data-delay="8">
+              <div>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(107,114,128,0.15)", color: "#9ca3af", border: "1px solid rgba(107,114,128,0.2)" }}>FREE</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Follow-Up AI Chat</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">After every analysis ask Claude anything about your chart. Get specific answers about entries, risk, alternative scenarios, and trade management — like a professional trader on call 24/7.</p>
+                <ul className="space-y-1.5">
+                  {["Ask anything about your chart", "Alternative entries & scenarios", "Trade management advice"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-[#00e676]/10 p-4 flex flex-col gap-3" style={{ background: "#080a10" }}>
+                <div className="flex justify-end">
+                  <div className="font-dm-mono text-[11px] text-white px-3 py-2 rounded-xl rounded-br-sm max-w-[80%]" style={{ background: "rgba(255,255,255,0.07)" }}>
+                    Where is a safer entry for this setup?
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: "#00e676" }}>
+                    <svg width="10" height="10" viewBox="0 0 15 15" fill="none"><path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="#080a10" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </div>
+                  <div className="font-dm-mono text-[10px] text-[#9ca3af] px-3 py-2 rounded-xl rounded-tl-sm flex-1 leading-relaxed" style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.1)" }}>
+                    A safer entry would be to wait for a retest of 3,285 support with a rejection candle on the 5m...
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <span className="font-dm-mono text-[10px] text-[#4b5563] flex-1">Ask anything about this chart...</span>
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(0,230,118,0.15)" }}>
+                    <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M2 8L8 5L2 2v2.5l4 .5-4 .5V8z" fill="#00e676" /></svg>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2510,7 +4181,7 @@ export default function App() {
           <div className="text-center mb-14" data-animate>
             <SectionBadge>HOW IT WORKS</SectionBadge>
             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-              Chart to trade plan in <span className="text-[#f5c518]">under 5 seconds</span>
+              Chart to trade plan in <span className="text-[#00e676]">under 5 seconds</span>
             </h2>
             <p className="text-[#6b7280] mt-4 text-lg">No complex setup. No learning curve. Just drop and go.</p>
           </div>
@@ -2522,7 +4193,7 @@ export default function App() {
               { n: "2", emoji: "🤖",  highlight: false, delay: "2", title: "Drop it in ChartIQ",
                 desc: "AI reads price action, structure, volume and indicators instantly.",
                 checks: ["Pattern recognition", "Support & resistance", "Multi-indicator analysis"] },
-              { n: "3", emoji: "📋",  highlight: true,  delay: "3", title: "Get your full trade plan",
+              { n: "3", emoji: "📋",  highlight: false, delay: "3", title: "Get your full trade plan",
                 desc: "Signal, entry, SL, TP, R:R, confidence score and AI summary in under 5 seconds.",
                 checks: ["Entry & exit levels", "Risk-reward ratio", "Confidence score 0–100"] },
               { n: "4", emoji: "📊",  highlight: false, delay: "4", title: "Track your performance",
@@ -2530,10 +4201,10 @@ export default function App() {
                 checks: ["Auto-saved to journal", "Win/loss tracking", "Performance over time"] },
             ].map((step) => (
               <div key={step.n} className="relative rounded-2xl border p-6 transition-all duration-200 hover:-translate-y-1"
-                style={{ borderColor: step.highlight ? "rgba(245,197,24,0.6)" : "rgba(255,255,255,0.07)", background: step.highlight ? "rgba(245,197,24,0.03)" : "#0c0f18", boxShadow: step.highlight ? "0 0 30px rgba(245,197,24,0.08)" : "none" }}
+                style={{ borderColor: step.highlight ? "rgba(0,230,118,0.35)" : "rgba(255,255,255,0.07)", background: "#0c0f18", boxShadow: "none" }}
                 data-animate data-delay={step.delay}>
                 <div className="absolute -top-4 -left-4 w-8 h-8 rounded-xl flex items-center justify-center text-sm font-extrabold shadow-lg"
-                  style={{ background: step.highlight ? "#f5c518" : "#00e676", color: "#080a10", boxShadow: step.highlight ? "0 0 16px rgba(245,197,24,0.5)" : "0 0 14px rgba(0,230,118,0.45)" }}>
+                  style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 14px rgba(0,230,118,0.45)" }}>
                   {step.n}
                 </div>
                 <div className="w-12 h-12 rounded-2xl bg-white/[0.04] flex items-center justify-center text-2xl mb-4">{step.emoji}</div>
@@ -2542,7 +4213,7 @@ export default function App() {
                 <ul className="space-y-1.5">
                   {step.checks.map((c) => (
                     <li key={c} className="flex items-start gap-2 text-xs text-[#6b7280]">
-                      <Check color={step.highlight ? "#f5c518" : "#22c55e"} />{c}
+                      <Check color="#22c55e" />{c}
                     </li>
                   ))}
                 </ul>
@@ -2555,45 +4226,106 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── MOST SHARED SETUPS ──────────────────────────────── */}
+      <MostSharedSetups />
+
       {/* ── PRICING ─────────────────────────────────────────── */}
       <section id="pricing" className="py-24 px-6">
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-14" data-animate>
+          <div className="text-center mb-10" data-animate>
             <SectionBadge>SIMPLE PRICING</SectionBadge>
             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-              Choose Your <span className="text-[#f5c518]">Trading Edge</span>
+              START FREE. <span className="text-[#00e676]">UPGRADE WHEN YOU ARE READY.</span>
             </h2>
-            <p className="text-[#6b7280] mt-4 text-lg">Start free. Upgrade when you&apos;re ready to go unlimited.</p>
+            <p className="text-[#6b7280] mt-4 text-lg">Join 2,400 traders already using ChartIQ. No card needed to start.</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-6">
+
+          {/* Monthly / Annual toggle */}
+          <div className="flex items-center justify-center mb-10" data-animate>
+            <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <button
+                onClick={() => setShowAnnualPricing(false)}
+                className="px-5 py-2 rounded-lg font-dm-mono text-sm font-bold transition-all"
+                style={!showAnnualPricing ? { background: "#00e676", color: "#080a10" } : { color: "#6b7280" }}>
+                Monthly
+              </button>
+              <button
+                onClick={() => setShowAnnualPricing(true)}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg font-dm-mono text-sm font-bold transition-all"
+                style={showAnnualPricing ? { background: "#00e676", color: "#080a10" } : { color: "#6b7280" }}>
+                Annual
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                  style={{ background: showAnnualPricing ? "rgba(8,10,16,0.2)" : "rgba(0,230,118,0.15)", color: showAnnualPricing ? "#080a10" : "#00e676" }}>
+                  SAVE 35%
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6 items-start">
             {[
               {
-                name: "Free", sub: "For new traders", price: "£0", period: "/month", note: "No card needed", noteColor: "#4ade80",
-                features: ["3 chart analyses per day", "Basic signal + entry/SL/TP", "Confidence score", "Economic calendar", "Risk calculator", "Last 10 journal entries", "1 follow-up question per analysis", "5 watchlist pairs"],
-                disabled: [],
+                name: "Free", sub: "For new traders",
+                price: "£0", annualPrice: "£0", period: "/month", annualNote: "Free forever",
+                note: "No card needed", noteColor: "#4ade80",
+                features: [
+                  { text: "5 analyses to get started",          locked: false },
+                  { text: "Basic signal + entry/SL/TP",        locked: false },
+                  { text: "Confidence score",                  locked: false },
+                  { text: "Risk calculator",                   locked: false },
+                  { text: "Trade Journal",                     locked: true  },
+                  { text: "Watchlist & alerts",                locked: true  },
+                  { text: "Economic calendar",                 locked: true  },
+                  { text: "Multi-timeframe analysis",          locked: true  },
+                ],
                 cta: "Start for free", highlight: false, popular: false, delay: "1",
               },
               {
-                name: "Pro", sub: "For serious traders", price: "£19", period: "/month", note: "Most popular", noteColor: "#f5c518",
-                features: ["Unlimited chart analyses", "Full trade breakdown + R:R", "Multi-timeframe analysis", "Unlimited journal history", "Unlimited follow-up questions", "Unlimited watchlist pairs", "Email alerts on watchlist", "Priority support", "PRO badge"],
-                disabled: [],
+                name: "Pro", sub: "For serious traders",
+                price: "£19", annualPrice: "£149", period: "/month", annualNote: "£12.42/mo · billed annually",
+                note: "Most popular", noteColor: "#00e676",
+                features: [
+                  { text: "Unlimited chart analyses",           locked: false },
+                  { text: "Full trade breakdown + R:R",         locked: false },
+                  { text: "Multi-timeframe analysis",           locked: false },
+                  { text: "Trade Journal (full history)",        locked: false },
+                  { text: "Watchlist + email alerts",           locked: false },
+                  { text: "Economic calendar",                  locked: false },
+                  { text: "Trade grade A+ to D",                locked: false },
+                  { text: "Confluence checklist",               locked: false },
+                  { text: "Priority support",                   locked: false },
+                ],
                 cta: "Upgrade to Pro", highlight: true, popular: true, delay: "2",
               },
               {
-                name: "Elite", sub: "For professional traders", price: "£39", period: "/month", note: "Coming soon", noteColor: "#c084fc",
-                features: ["Everything in Pro", "Multi-chart comparison", "PDF export", "Custom branding on exports", "Early access to new features", "24h priority support"],
-                disabled: [],
+                name: "Elite", sub: "For professional traders",
+                price: "£39", annualPrice: "£299", period: "/month", annualNote: "£24.92/mo · billed annually",
+                note: "Coming soon", noteColor: "#c084fc",
+                features: [
+                  { text: "Everything in Pro",                  locked: false },
+                  { text: "Multi-chart comparison",             locked: false },
+                  { text: "PDF export",                         locked: false },
+                  { text: "Custom branding on exports",         locked: false },
+                  { text: "Early access to new features",       locked: false },
+                  { text: "24h priority support",               locked: false },
+                ],
                 cta: "Join waitlist", highlight: false, popular: false, delay: "3",
               },
             ].map((planItem) => (
               <div key={planItem.name}
-                className="relative rounded-2xl border p-7 transition-all duration-200 hover:-translate-y-1"
-                style={{ borderColor: planItem.highlight ? "rgba(245,197,24,0.55)" : "rgba(255,255,255,0.07)", background: planItem.highlight ? "rgba(245,197,24,0.025)" : "#0c0f18", boxShadow: planItem.highlight ? "0 0 40px rgba(245,197,24,0.07)" : "none" }}
+                className="relative rounded-2xl border transition-all duration-200 hover:-translate-y-1"
+                style={{
+                  borderColor: planItem.highlight ? "rgba(0,230,118,0.45)" : "rgba(255,255,255,0.07)",
+                  background: planItem.highlight ? "rgba(0,230,118,0.025)" : "#0c0f18",
+                  boxShadow: planItem.highlight ? "0 0 40px rgba(0,230,118,0.08)" : "none",
+                  padding: planItem.highlight ? "2rem" : "1.75rem",
+                  transform: planItem.highlight ? "scale(1.03)" : undefined,
+                }}
                 data-animate data-delay={planItem.delay}>
                 {planItem.popular && (
-                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-[#f5c518] text-[#080a10] text-xs font-extrabold whitespace-nowrap"
-                    style={{ boxShadow: "0 0 20px rgba(245,197,24,0.5)" }}>
-                    MOST POPULAR
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-[#00e676] text-[#080a10] text-xs font-extrabold whitespace-nowrap"
+                    style={{ boxShadow: "0 0 20px rgba(0,230,118,0.45)" }}>
+                    BEST VALUE
                   </div>
                 )}
                 <div className="mb-5">
@@ -2601,22 +4333,38 @@ export default function App() {
                   <p className="text-[#6b7280] text-sm">{planItem.sub}</p>
                 </div>
                 <div className="mb-1">
-                  <span className="text-[40px] font-extrabold leading-none" style={{ color: planItem.highlight ? "#f5c518" : "white" }}>{planItem.price}</span>
-                  <span className="text-[#6b7280] text-sm">{planItem.period}</span>
+                  <span className="text-[40px] font-extrabold leading-none" style={{ color: planItem.highlight ? "#00e676" : "white" }}>
+                    {showAnnualPricing ? planItem.annualPrice : planItem.price}
+                  </span>
+                  <span className="text-[#6b7280] text-sm">{showAnnualPricing ? "/year" : planItem.period}</span>
                 </div>
-                <p className="text-sm mb-6 mt-1" style={{ color: planItem.noteColor }}>{planItem.note}</p>
+                <p className="text-sm mb-6 mt-1" style={{ color: planItem.noteColor }}>
+                  {showAnnualPricing ? planItem.annualNote : planItem.note}
+                </p>
                 <ul className="space-y-2 mb-7">
-                  {planItem.features.map((f) => <li key={f} className="flex items-start gap-2 text-sm text-white"><Check />{f}</li>)}
+                  {planItem.features.map((f) => {
+                    const feat = typeof f === "string" ? { text: f, locked: false } : f;
+                    return (
+                      <li key={feat.text} className="flex items-center gap-2 text-sm"
+                        style={{ color: feat.locked ? "#4b5563" : "white" }}>
+                        {feat.locked
+                          ? <svg width="12" height="13" viewBox="0 0 12 13" fill="none" className="flex-shrink-0"><rect x="1.5" y="5.5" width="9" height="6.5" rx="1.3" stroke="#4b5563" strokeWidth="1.1"/><path d="M3.5 5.5V4A2.5 2.5 0 018.5 4v1.5" stroke="#4b5563" strokeWidth="1.1" strokeLinecap="round"/></svg>
+                          : <Check />
+                        }
+                        {feat.text}
+                      </li>
+                    );
+                  })}
                 </ul>
                 <button
                   onClick={() => {
                     if (planItem.highlight && clientId) {
-                      fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+                      fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, annual: showAnnualPricing }) })
                         .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
                     }
                   }}
                   className="w-full py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
-                  style={planItem.highlight ? { background: "#f5c518", color: "#080a10", boxShadow: "0 0 22px rgba(245,197,24,0.4)" } : { border: "1px solid rgba(255,255,255,0.14)", color: "white" }}>
+                  style={planItem.highlight ? { background: "#00e676", color: "#080a10", boxShadow: "0 0 22px rgba(0,230,118,0.4)" } : { border: "1px solid rgba(255,255,255,0.14)", color: "white" }}>
                   {planItem.cta}
                 </button>
               </div>
@@ -2631,7 +4379,7 @@ export default function App() {
           <div className="text-center mb-14" data-animate>
             <SectionBadge>WHAT TRADERS SAY</SectionBadge>
             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-              Real traders. <span className="text-[#f5c518]">Real results.</span>
+              Real traders. <span className="text-[#00e676]">Real results.</span>
             </h2>
           </div>
           <div className="grid md:grid-cols-3 gap-6">
@@ -2658,7 +4406,7 @@ export default function App() {
               <div key={t.name} className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay={t.delay}>
                 <div className="flex gap-0.5">
                   {[0,1,2,3,4].map((i) => (
-                    <svg key={i} width="14" height="14" viewBox="0 0 14 14" fill="#f5c518"><path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/></svg>
+                    <svg key={i} width="14" height="14" viewBox="0 0 14 14" fill="#00e676"><path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/></svg>
                   ))}
                 </div>
                 <p className="text-[#9ca3af] text-sm leading-relaxed flex-1">&ldquo;{t.quote}&rdquo;</p>
@@ -2673,7 +4421,7 @@ export default function App() {
       </section>
 
       {/* ── CTA BAND ────────────────────────────────────────── */}
-      <section className="cta-gradient py-28 px-6">
+      <section className="py-28 px-6" style={{ background: "#080c0a", borderTop: "1px solid rgba(0,230,118,0.18)", borderBottom: "1px solid rgba(0,230,118,0.18)" }}>
         <div className="max-w-4xl mx-auto text-center" data-animate>
           <h2 className="font-bebas text-[clamp(52px,8vw,88px)] leading-none tracking-[0.03em] text-white mb-4">
             STOP GUESSING.<br /><span className="text-[#00e676]">START TRADING.</span>
@@ -2686,7 +4434,7 @@ export default function App() {
             <a href="#how-it-works" className="btn-outline px-8 py-3.5 text-sm">See it in action →</a>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-6 text-[#6b7280] text-sm">
-            {["🔒 No credit card required", "⚡ 3 free analyses daily", "📊 Works with any platform"].map((t) => (
+            {["🔒 No credit card required", "⚡ 5 free analyses to start", "📊 Works with any platform"].map((t) => (
               <span key={t}>{t}</span>
             ))}
           </div>
@@ -2700,7 +4448,7 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2.5 mb-4">
                 <LogoMark />
-                <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#f5c518]">AI</span></span>
+                <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
               </div>
               <p className="text-[#4b5563] text-sm leading-relaxed mb-5">
                 AI-powered trading intelligence. Upload any chart. Get institutional-grade insights instantly.
@@ -2712,21 +4460,29 @@ export default function App() {
               </div>
             </div>
             {[
-              { title: "Product",   links: ["Features", "How It Works", "Pricing", "Demo", "Case Studies"] },
-              { title: "Resources", links: ["Blog", "FAQ", "Contact", "About Us", "Community"] },
-              { title: "Legal",     links: ["Privacy Policy", "Terms of Service", "Cookie Policy", "Disclaimer"] },
+              { title: "Product",   links: [["Features", "#features"], ["How It Works", "#how-it-works"], ["Pricing", "/pricing"], ["Brokers", "/brokers"], ["Pine Scripts", "/tools/pine-scripts"]] },
+              { title: "Resources", links: [["Blog", "#"], ["FAQ", "#"], ["Contact", "#"], ["About Us", "#"], ["Community", "#"]] },
+              { title: "Legal",     links: [["Privacy Policy", "#"], ["Terms of Service", "#"], ["Cookie Policy", "#"], ["Disclaimer", "#"]] },
             ].map((col) => (
               <div key={col.title}>
                 <h4 className="text-white font-semibold text-sm mb-4">{col.title}</h4>
                 <ul className="space-y-2.5">
-                  {col.links.map((l) => (
-                    <li key={l}><a href="#" className="text-[#4b5563] text-sm hover:text-white transition-colors duration-150">{l}</a></li>
+                  {col.links.map(([label, href]) => (
+                    <li key={label}><a href={href} className="text-[#4b5563] text-sm hover:text-white transition-colors duration-150">{label}</a></li>
                   ))}
                 </ul>
               </div>
             ))}
           </div>
-          <div className="pt-8 border-t border-white/[0.05] flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="pt-8 border-t border-white/[0.05] mb-5">
+            <p className="text-[#374151] text-[11px] leading-relaxed text-center">
+              ChartIQ AI analysis is for informational purposes only and does not constitute financial advice.
+              Trading involves significant risk of loss. Never risk more than you can afford to lose.
+              Automated trading features are provided as tools only — you are solely responsible for all trading decisions and outcomes.
+              Past performance does not guarantee future results.
+            </p>
+          </div>
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-[#374151] text-sm">© 2026 ChartIQ AI. All rights reserved.</p>
             <div className="flex gap-6 text-[#374151] text-sm">
               <span>🔒 SSL Secured</span>
