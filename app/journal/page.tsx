@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { JournalEntry, Outcome } from "@/app/lib/supabase";
-import { AuthNavButtons } from "@/app/providers";
+import AppNav from "@/app/components/AppNav";
 import { useUserPlan } from "@/app/lib/plan-context";
 import { ProLockedPage } from "@/app/components/ProLockedPage";
 
@@ -517,26 +517,7 @@ export default function JournalPage() {
       )}
 
       {/* ── NAV ── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 nav-glass">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5">
-            <LogoMark />
-            <span className="font-bold text-[17px] text-white">
-              ChartIQ <span className="text-[#00e676]">AI</span>
-            </span>
-          </Link>
-          <div className="hidden md:flex items-center gap-7">
-            <Link href="/watchlist"   className="text-sm text-[#6b7280] hover:text-white transition-colors">Watchlist</Link>
-            <Link href="/calculator"  className="text-sm text-[#6b7280] hover:text-white transition-colors">Calculator</Link>
-            <Link href="/calendar"    className="text-sm text-[#6b7280] hover:text-white transition-colors">Calendar</Link>
-            <Link href="/journal"     className="text-sm font-semibold text-[#00e676]">Journal</Link>
-          </div>
-          <Link href="/#analyze" className="btn-yellow px-5 py-2 text-sm hidden md:inline-flex">
-            ⚡ Analyze Chart
-          </Link>
-          <AuthNavButtons className="hidden md:flex" />
-        </div>
-      </nav>
+      <AppNav />
 
       {/* ── Locked for free users ── */}
       {!isPro ? (

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useUserPlan } from "@/app/lib/plan-context";
-import { AuthNavButtons } from "@/app/providers";
+import AppNav from "@/app/components/AppNav";
 
 function LogoMark() {
   return (
@@ -440,28 +440,7 @@ export default function Account() {
   return (
     <div className="min-h-screen bg-[#080a10] text-white">
       {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 nav-glass">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5">
-            <LogoMark />
-            <span className="font-bold text-[17px] text-white">
-              ChartIQ <span className="text-[#00e676]">AI</span>
-            </span>
-          </Link>
-          <div className="flex items-center gap-3">
-            {isPro && (
-              <span className="font-dm-mono text-[10px] font-bold tracking-widest px-2.5 py-1 rounded-full"
-                style={{ background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.25)" }}>
-                {plan === "elite" ? "ELITE" : "PRO"}
-              </span>
-            )}
-            <Link href="/" className="btn-purple px-5 py-2 text-sm hidden md:inline-flex">
-              Analyze Chart
-            </Link>
-            <AuthNavButtons className="hidden md:flex" />
-          </div>
-        </div>
-      </nav>
+      <AppNav />
 
       <main className="pt-32 pb-24 px-6">
         <div className="max-w-lg mx-auto">

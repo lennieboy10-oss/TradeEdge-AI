@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useUserPlan } from "@/app/lib/plan-context";
-import { AuthNavButtons } from "@/app/providers";
+import AppNav from "@/app/components/AppNav";
 import { ProLockedPage } from "@/app/components/ProLockedPage";
 
 type CalEvent = {
@@ -162,7 +162,6 @@ export default function CalendarPage() {
   const [lastRefresh, setLastRefresh] = useState(0);
   const [impact, setImpact]         = useState<ImpactFilter>("High");
   const [currency, setCurrency]     = useState<CurrencyFilter>("All");
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [clientId, setClientId]     = useState<string | null>(null);
   const [plan, setPlan]             = useState("free");
 
@@ -204,65 +203,13 @@ export default function CalendarPage() {
   const sortedDates = Array.from(groups.keys()).sort();
   const today = todayUTC();
 
-  const navLinks = ["Features", "How It Works", "Pricing", "Watchlist", "Calendar", "Journal", "Account"];
   const isPro = plan === "pro";
 
   return (
     <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden">
 
-      {/* Mobile drawer */}
-      <div className={`mobile-drawer md:hidden ${mobileOpen ? "open" : ""}`}>
-        <div className="flex items-center justify-between px-6 h-16 border-b border-white/[0.06]">
-          <div className="flex items-center gap-2.5">
-            <LogoMark />
-            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#00e676]">AI</span></span>
-          </div>
-          <button onClick={() => setMobileOpen(false)} className="w-9 h-9 rounded-lg bg-white/[0.06] flex items-center justify-center">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          </button>
-        </div>
-        <nav className="flex flex-col px-6 pt-8 gap-1">
-          {navLinks.map((l) => {
-            const href = l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calendar" ? "/calendar" : `/#${l.toLowerCase().replace(/ /g, "-")}`;
-            return (
-              <Link key={l} href={href} onClick={() => setMobileOpen(false)}
-                className="text-lg font-semibold text-[#9ca3af] hover:text-white py-3 border-b border-white/[0.05] transition-colors">{l}</Link>
-            );
-          })}
-        </nav>
-      </div>
-
       {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 nav-glass">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5">
-            <LogoMark />
-            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
-          </Link>
-          <div className="hidden md:flex items-center gap-7">
-            {navLinks.map((l) => {
-              const href = l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calendar" ? "/calendar" : `/#${l.toLowerCase().replace(/ /g, "-")}`;
-              return (
-                <Link key={l} href={href} className="text-sm transition-colors duration-150"
-                  style={{ color: l === "Calendar" ? "#00e676" : "#6b7280" }}>{l}</Link>
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-3">
-            {isPro && (
-              <span className="hidden md:inline-flex font-dm-mono text-[10px] font-bold tracking-widest px-2.5 py-1 rounded-full"
-                style={{ background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.25)" }}>PRO</span>
-            )}
-            <AuthNavButtons className="hidden md:flex" />
-            <button onClick={() => setMobileOpen(true)}
-              className="md:hidden w-9 h-9 rounded-lg bg-white/[0.06] flex flex-col items-center justify-center gap-1.5">
-              <span className="block rounded-full" style={{ width: "18px", height: "2px", background: "white" }} />
-              <span className="block rounded-full" style={{ width: "14px", height: "2px", background: "white" }} />
-              <span className="block rounded-full" style={{ width: "18px", height: "2px", background: "white" }} />
-            </button>
-          </div>
-        </div>
-      </nav>
+      <AppNav />
 
       {/* ── Locked for free users ── */}
       {!isProUser ? (

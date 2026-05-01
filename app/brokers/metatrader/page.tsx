@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { AuthNavButtons } from "@/app/providers";
+import AppNav from "@/app/components/AppNav";
 
 function LogoMark() {
   return (
@@ -137,18 +137,7 @@ const troubleshooting = [
 export default function MetaTraderGuide() {
   return (
     <div className="min-h-screen bg-[#080a10] text-white">
-      <nav className="fixed top-0 left-0 right-0 z-50 nav-glass">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5">
-            <LogoMark />
-            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
-          </Link>
-          <div className="flex items-center gap-4">
-            <Link href="/brokers" className="text-sm text-[#6b7280] hover:text-white transition-colors">← Brokers</Link>
-            <AuthNavButtons />
-          </div>
-        </div>
-      </nav>
+      <AppNav />
 
       <main className="pt-32 pb-24 px-6">
         <div className="max-w-2xl mx-auto">

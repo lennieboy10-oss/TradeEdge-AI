@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import AppNav from "@/app/components/AppNav";
 
 type CalcAssetType = "forex" | "crypto" | "stocks" | "gold";
 type CalcCurrency  = "GBP" | "USD" | "EUR";
@@ -146,25 +147,7 @@ export default function CalculatorPage() {
   return (
     <div className="min-h-screen bg-[#080a10] text-white">
       {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 nav-glass">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center gap-4">
-          <a href="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-[#00e676] flex items-center justify-center flex-shrink-0">
-              <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                <path d="M2 11L5.5 6L8.5 8.5L12 3.5" stroke="#080a10" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <span className="font-bold text-[17px] text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
-          </a>
-          <span className="text-[#4b5563] text-sm hidden md:inline">/ Position Calculator</span>
-          <div className="ml-auto hidden md:flex items-center gap-5">
-            {[["Watchlist", "/watchlist"], ["Calendar", "/calendar"], ["Journal", "/journal"]].map(([l, h]) => (
-              <a key={l} href={h} className="text-sm text-[#6b7280] hover:text-white transition-colors">{l}</a>
-            ))}
-            <a href="/#analyze" className="btn-purple px-4 py-2 text-sm">Analyze Chart</a>
-          </div>
-        </div>
-      </nav>
+      <AppNav />
 
       <main className="pt-28 pb-20 px-6">
         <div className="max-w-2xl mx-auto">

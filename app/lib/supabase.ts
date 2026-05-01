@@ -115,4 +115,64 @@ create table public.automation_settings (
 );
 alter table public.automation_settings enable row level security;
 create policy "allow_all" on public.automation_settings for all using (true) with check (true);
+
+-- ── Gamification: profiles (streak / XP / level) ──────────────
+-- Run this to add gamification columns to an existing profiles table,
+-- or create it fresh if you don't have one yet.
+--
+-- ALTER TABLE public.profiles
+--   ADD COLUMN IF NOT EXISTS current_streak  integer     DEFAULT 0,
+--   ADD COLUMN IF NOT EXISTS longest_streak  integer     DEFAULT 0,
+--   ADD COLUMN IF NOT EXISTS last_active_date date,
+--   ADD COLUMN IF NOT EXISTS total_xp        integer     DEFAULT 0,
+--   ADD COLUMN IF NOT EXISTS level           integer     DEFAULT 1;
+--
+-- If profiles doesn't exist yet:
+-- create table public.profiles (
+--   id              uuid        default gen_random_uuid() primary key,
+--   user_id         text        not null unique,
+--   current_streak  integer     default 0,
+--   longest_streak  integer     default 0,
+--   last_active_date date,
+--   total_xp        integer     default 0,
+--   level           integer     default 1,
+--   updated_at      timestamptz default now()
+-- );
+-- alter table public.profiles enable row level security;
+-- create policy "allow_all" on public.profiles for all using (true) with check (true);
+
+-- ── Gamification: achievements ────────────────────────────────
+-- create table public.achievements (
+--   id             uuid        default gen_random_uuid() primary key,
+--   user_id        text,
+--   achievement_id text,
+--   earned_at      timestamptz default now()
+-- );
+-- alter table public.achievements enable row level security;
+-- create policy "allow_all" on public.achievements for all using (true) with check (true);
+
+-- ── Gamification: xp_history ─────────────────────────────────
+-- create table public.xp_history (
+--   id         uuid        default gen_random_uuid() primary key,
+--   user_id    text,
+--   xp_amount  integer,
+--   reason     text,
+--   created_at timestamptz default now()
+-- );
+-- alter table public.xp_history enable row level security;
+-- create policy "allow_all" on public.xp_history for all using (true) with check (true);
+
+-- ── Gamification: leaderboard_weekly ─────────────────────────
+-- create table public.leaderboard_weekly (
+--   id           uuid    default gen_random_uuid() primary key,
+--   user_id      text,
+--   week_start   date,
+--   xp_earned    integer default 0,
+--   analyses_run integer default 0,
+--   win_rate     decimal,
+--   streak       integer default 0,
+--   unique (user_id, week_start)
+-- );
+-- alter table public.leaderboard_weekly enable row level security;
+-- create policy "allow_all" on public.leaderboard_weekly for all using (true) with check (true);
 */

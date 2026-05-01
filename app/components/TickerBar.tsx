@@ -45,8 +45,8 @@ export default function TickerBar() {
     <div
       className="fixed left-0 right-0 z-[49] overflow-hidden"
       style={{
-        top:          "64px",
-        height:       "32px",
+        top:          "60px",
+        height:       "28px",
         background:   "rgba(8, 10, 16, 0.97)",
         borderTop:    "1px solid rgba(0, 230, 118, 0.15)",
         borderBottom: "1px solid rgba(0, 230, 118, 0.15)",
@@ -63,19 +63,19 @@ export default function TickerBar() {
             <div className="flex items-center gap-2 px-4">
               {/* Pair name */}
               <span
-                className="text-[10px] md:text-[11px] font-semibold tracking-widest uppercase"
+                className="text-[11px] font-semibold tracking-widest uppercase"
                 style={{ color: "#6b7280" }}>
                 {item.label}
               </span>
 
               {/* Price */}
-              <span className="font-dm-mono text-[10px] md:text-[11px] text-white tabular-nums">
+              <span className="font-dm-mono text-[11px] text-white tabular-nums">
                 {item.price}
               </span>
 
               {/* % change */}
               <span
-                className="font-dm-mono text-[9px] md:text-[10px] font-semibold px-1.5 py-0.5 rounded tabular-nums"
+                className="font-dm-mono text-[10px] font-semibold px-1.5 py-0.5 rounded tabular-nums"
                 style={{
                   color:      item.change >= 0 ? "#00e676" : "#f87171",
                   background: item.change >= 0

@@ -3,7 +3,21 @@
 import { useState } from "react";
 import { AuthProvider, useAuth } from "./lib/auth-context";
 import { UserPlanProvider, useUserPlan } from "./lib/plan-context";
+import { GamificationProvider } from "./lib/gamification-context";
+import XPToast from "./components/XPToast";
+import CelebrationModal from "./components/CelebrationModal";
 import Link from "next/link";
+
+function GamificationLayer({ children }: { children: React.ReactNode }) {
+  const { isPro, isElite } = useUserPlan();
+  return (
+    <GamificationProvider isPro={isPro} isElite={isElite}>
+      {children}
+      <XPToast />
+      <CelebrationModal />
+    </GamificationProvider>
+  );
+}
 
 function TrialBanner() {
   const { isOnTrial, trialEndsAt } = useUserPlan();
@@ -104,8 +118,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
       <UserPlanProvider>
-        <TrialBanner />
-        {children}
+        <GamificationLayer>
+          <TrialBanner />
+          {children}
+        </GamificationLayer>
       </UserPlanProvider>
     </AuthProvider>
   );

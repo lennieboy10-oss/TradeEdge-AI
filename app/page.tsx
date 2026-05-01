@@ -3,14 +3,18 @@
 import { useState, useRef, useEffect } from "react";
 import { useUserPlan } from "@/app/lib/plan-context";
 import { useAuth } from "@/app/lib/auth-context";
-import { AuthNavButtons } from "@/app/providers";
 import { motion } from "framer-motion";
+import AppNav from "@/app/components/AppNav";
 import ShareModal from "@/app/components/ShareModal";
 import type { ShareCardParams } from "@/app/lib/shareCard";
 import AnnotatedChart from "@/app/components/AnnotatedChart";
 import type { SMCData } from "@/app/components/AnnotatedChart";
 import PineScriptExport from "@/app/components/PineScriptExport";
 import MTTradeSetup from "@/app/components/MTTradeSetup";
+import GamificationBar from "@/app/components/GamificationBar";
+import DailyChallenges from "@/app/components/DailyChallenges";
+import WelcomeQuest from "@/app/components/WelcomeQuest";
+import { useGamification } from "@/app/lib/gamification-context";
 
 // ── Types ──────────────────────────────────────────────────────
 type AnalysisResult = {
@@ -2548,7 +2552,6 @@ export default function App() {
   const [result, setResult]         = useState<MultiResult | null>(null);
   const [error, setError]           = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [revealKey, setRevealKey]           = useState(0);
   const [showLimitModal, setShowLimitModal]   = useState(false);
   const [freeUsed, setFreeUsed]               = useState(0);
@@ -2562,6 +2565,7 @@ export default function App() {
   const { plan, isPro: isPlanPro } = useUserPlan();
   const { user, loading: authLoading } = useAuth();
   const isPro = isPlanPro;
+  const { awardXP, recordActivity, completeChallenge } = useGamification();
   const fileRef       = useRef<HTMLInputElement>(null);
   const resultsRef    = useRef<HTMLDivElement>(null);
   const [chartBase64, setChartBase64]   = useState<string | null>(null);
@@ -2612,12 +2616,6 @@ export default function App() {
     document.querySelectorAll("[data-animate]").forEach((el) => io.observe(el));
     return () => io.disconnect();
   }, []);
-
-  // Lock body scroll when drawer open
-  useEffect(() => {
-    document.body.style.overflow = mobileOpen ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
-  }, [mobileOpen]);
 
   // Welcome modal — fires once per device for non-logged-in visitors
   useEffect(() => {
@@ -2747,6 +2745,19 @@ export default function App() {
         setResult({ analyses: data.analyses, tfLabels: data.tfLabels, confluence: data.confluence });
         setJournalId(data.journalId ?? null);
         setRevealKey(k => k + 1);
+        // ── Gamification ──────────────────────────────────────
+        recordActivity();
+        const curAnalysis = data.analyses.current;
+        const grade      = curAnalysis.tradeScore ?? "";
+        const confidence = curAnalysis.confidence ?? 0;
+        const isMultiTf  = !!(data.analyses.higher && data.analyses.highest);
+        awardXP("ANALYSIS_RUN", { grade, confidence, asset: asset.trim() || undefined, isMultiTf });
+        if (grade === "A+")        awardXP("A_PLUS_GRADE");
+        if (confidence >= 85)      awardXP("HIGH_CONFIDENCE");
+        completeChallenge("analyses");
+        if (confidence >= 80)      completeChallenge("confidence");
+        if (asset.trim())          completeChallenge("assets");
+        // ─────────────────────────────────────────────────────
         setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
         // Toast when entry window is open right now
         if (isPro && data.analyses.current.entryTimeUTC) {
@@ -2785,15 +2796,6 @@ export default function App() {
     cur?.bias === "BULLISH" ? "#00e676" :
     cur?.bias === "BEARISH" ? "#f87171" :
     "#9ca3af";
-
-  const navLinks = ["Features", "How It Works", "Pricing", "Brokers", "Tools", "Watchlist", "Calculator", "Calendar", "Journal", "Account"];
-
-  // Calendar urgent badge: HIGH impact event within 2 hours
-  const calHasUrgent = calendarEvents.some((e) => {
-    if (e.impact !== "High") return false;
-    const min = calMinutesFromNow(e);
-    return min !== null && min > 0 && min <= 120;
-  });
 
   return (
     <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden">
@@ -2860,127 +2862,8 @@ export default function App() {
       {/* ── MOBILE TRIAL BAR (non-logged-in) ────────────────── */}
       {!user && !isPro && <MobileTrialBar />}
 
-      {/* ── MOBILE DRAWER ───────────────────────────────────── */}
-      <div className={`mobile-drawer md:hidden ${mobileOpen ? "open" : ""}`}>
-        <div className="flex items-center justify-between px-6 h-16 border-b border-white/[0.06]">
-          <div className="flex items-center gap-2.5">
-            <LogoMark />
-            <span className="font-bold text-[17px]">ChartIQ <span className="text-[#00e676]">AI</span></span>
-          </div>
-          <button onClick={() => setMobileOpen(false)} className="w-9 h-9 rounded-lg bg-white/[0.06] flex items-center justify-center">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 3l10 10M13 3L3 13" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-        <nav className="flex flex-col px-6 pt-8 gap-1">
-          {navLinks.map((l) => (
-            <a key={l} href={l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calculator" ? "/calculator" : l === "Calendar" ? "/calendar" : `#${l.toLowerCase().replace(/ /g, "-")}`}
-              onClick={() => setMobileOpen(false)}
-              className="text-lg font-semibold text-[#9ca3af] hover:text-white py-3 border-b border-white/[0.05] transition-colors">
-              {l}
-            </a>
-          ))}
-          <a href="#analyze" onClick={() => setMobileOpen(false)}
-            className="btn-yellow mt-6 py-4 text-base text-center rounded-xl flex items-center justify-center gap-2">
-            ⚡ Analyze My Chart
-          </a>
-        </nav>
-      </div>
-
       {/* ── NAV ─────────────────────────────────────────────── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 nav-glass">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <LogoMark />
-            <span className="font-bold text-[17px] text-white">
-              ChartIQ <span className="text-[#00e676]">AI</span>
-            </span>
-          </div>
-          <div className="hidden md:flex items-center gap-7">
-            {navLinks.map((l) => {
-              const href = l === "Journal" ? "/journal" : l === "Account" ? "/account" : l === "Watchlist" ? "/watchlist" : l === "Calculator" ? "/calculator" : l === "Calendar" ? "/calendar" : l === "Brokers" ? "/brokers" : l === "Tools" ? "/tools/pine-scripts" : l === "Pricing" ? "/pricing" : `#${l.toLowerCase().replace(/ /g, "-")}`;
-              const isProLocked = !isPro && ["Journal", "Watchlist", "Calendar"].includes(l);
-              return (
-                <a key={l} href={href}
-                  className="text-sm text-[#6b7280] hover:text-white transition-colors duration-150 flex items-center gap-1.5 group relative"
-                  title={isProLocked ? "Pro feature" : undefined}>
-                  {l}
-                  {isProLocked && (
-                    <>
-                      <svg width="10" height="11" viewBox="0 0 10 11" fill="none" className="flex-shrink-0">
-                        <rect x="1" y="4.5" width="8" height="6" rx="1.2" stroke="#00e676" strokeWidth="1.1"/>
-                        <path d="M3 4.5V3a2 2 0 014 0v1.5" stroke="#00e676" strokeWidth="1.1" strokeLinecap="round"/>
-                      </svg>
-                      <span className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 rounded-lg text-[10px] font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                        style={{ background: "#0c0f18", border: "1px solid rgba(0,230,118,0.3)", color: "#00e676" }}>
-                        Pro feature
-                      </span>
-                    </>
-                  )}
-                </a>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* PRO badge */}
-            {isPro && (
-              <span className="hidden md:inline-flex font-dm-mono text-[10px] font-bold tracking-widest px-2.5 py-1 rounded-full"
-                style={{ background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.25)" }}>
-                PRO
-              </span>
-            )}
-            {/* Usage counter (free only) */}
-            {!isPro && (
-              <div className="hidden md:flex flex-col gap-1 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.07] min-w-[118px]">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="font-dm-mono text-[10px] leading-none"
-                    style={{ color: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 1 ? "#f87171" : freeUsed >= FREE_LIMIT - 2 ? "#9ca3af" : "#00e676" }}>
-                    {freeUsed >= FREE_LIMIT ? "No analyses left" : freeUsed >= FREE_LIMIT - 1 ? "1 free left" : `${FREE_LIMIT - freeUsed} free left`}
-                  </span>
-                  <span className="font-dm-mono text-[9px] text-[#4b5563]">{freeUsed}/{FREE_LIMIT}</span>
-                </div>
-                <div className="w-full h-[4px] rounded-full bg-white/[0.08] overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${Math.min(100, (freeUsed / FREE_LIMIT) * 100)}%`,
-                      background: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 1 ? "#f87171" : freeUsed >= FREE_LIMIT - 2 ? "#9ca3af" : "#00e676",
-                      boxShadow: freeUsed >= FREE_LIMIT ? "0 0 6px rgba(239,68,68,0.6)" : "0 0 5px rgba(0,230,118,0.4)",
-                    }}
-                  />
-                </div>
-                <span className="font-dm-mono text-[8px] text-[#4b5563] leading-none">Pro is unlimited</span>
-              </div>
-            )}
-            {/* Session clock */}
-            <SessionClock />
-            {/* Calendar icon with urgent-event badge */}
-            <a href="/calendar"
-              className="hidden md:flex relative w-9 h-9 rounded-lg bg-white/[0.04] border border-white/[0.08] items-center justify-center transition-colors hover:bg-white/[0.08]"
-              title="Economic Calendar">
-              <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                <rect x="1" y="2.5" width="13" height="12" rx="2" stroke="#6b7280" strokeWidth="1.2"/>
-                <path d="M4.5 1v2M10.5 1v2M1 6.5h13" stroke="#6b7280" strokeWidth="1.2" strokeLinecap="round"/>
-              </svg>
-              {calHasUrgent && (
-                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-red-500 border-2 border-[#080a10]" />
-              )}
-            </a>
-            <a href="#analyze" className="btn-purple px-5 py-2 text-sm hidden md:inline-flex">
-              See Live Demo
-            </a>
-            <AuthNavButtons className="hidden md:flex" />
-            <button onClick={() => setMobileOpen(true)}
-              className="md:hidden w-9 h-9 rounded-lg bg-white/[0.06] flex flex-col items-center justify-center gap-1.5">
-              <span className="w-4.5 h-0.5 bg-white rounded-full block" style={{ width: "18px", height: "2px" }} />
-              <span className="w-4.5 h-0.5 bg-white rounded-full block" style={{ width: "14px", height: "2px" }} />
-              <span className="w-4.5 h-0.5 bg-white rounded-full block" style={{ width: "18px", height: "2px" }} />
-            </button>
-          </div>
-        </div>
-      </nav>
+      <AppNav />
 
       {/* ── HERO ────────────────────────────────────────────── */}
       <section className="relative pt-36 pb-24 px-6 overflow-hidden">
@@ -3116,6 +2999,15 @@ export default function App() {
 
           {/* ── Economic calendar strip ── */}
           <CalendarStrip events={calendarEvents} />
+
+          {/* ── Gamification bar (logged-in users) ── */}
+          {(user || isPro) && (
+            <>
+              <GamificationBar />
+              <WelcomeQuest />
+              <DailyChallenges />
+            </>
+          )}
 
           <div className="grid md:grid-cols-2 gap-6">
 
@@ -4460,7 +4352,7 @@ export default function App() {
               </div>
             </div>
             {[
-              { title: "Product",   links: [["Features", "#features"], ["How It Works", "#how-it-works"], ["Pricing", "/pricing"], ["Brokers", "/brokers"], ["Pine Scripts", "/tools/pine-scripts"]] },
+              { title: "Product",   links: [["Features", "#features"], ["How It Works", "#how-it-works"], ["Pricing", "/pricing"], ["Brokers", "/brokers"], ["Pine Scripts", "/tools/pine-scripts"], ["Strategy Tester", "/strategy-tester"]] },
               { title: "Resources", links: [["Blog", "#"], ["FAQ", "#"], ["Contact", "#"], ["About Us", "#"], ["Community", "#"]] },
               { title: "Legal",     links: [["Privacy Policy", "#"], ["Terms of Service", "#"], ["Cookie Policy", "#"], ["Disclaimer", "#"]] },
             ].map((col) => (
