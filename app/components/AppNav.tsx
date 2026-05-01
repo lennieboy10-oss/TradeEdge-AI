@@ -41,7 +41,6 @@ const RESOURCES_ITEMS = [
   { label: "Pine Script Library",  href: "/tools/pine-scripts", icon: "📜" },
   { label: "Broker Connections",   href: "/brokers",             icon: "🔗" },
   { label: "Setup Guides",         href: "/#guides",             icon: "📖" },
-  { label: "Account",              href: "/account",             icon: "👤" },
 ];
 
 const AVATAR_ITEMS = [
@@ -188,6 +187,8 @@ export default function AppNav() {
             <NavDropdown label="Resources" id="resources" open={dropdown === "resources"} onOpen={openDrop} onClose={closeDrop}>
               <DropPanel items={RESOURCES_ITEMS} onClose={() => setDropdown(null)} />
             </NavDropdown>
+
+            <Link href="/account" className="text-[13px] text-[#6b7280] hover:text-white transition-colors">Account</Link>
           </div>
 
           {/* Right side */}
@@ -431,6 +432,11 @@ export default function AppNav() {
                     </div>
                   )}
                 </div>
+
+                <Link href="/account" onClick={() => setMobileOpen(false)}
+                  className="flex items-center py-3 text-[15px] font-semibold text-[#9ca3af] hover:text-white border-b border-white/[0.05] transition-colors">
+                  Account
+                </Link>
 
                 {/* Logged-in extra links */}
                 {user && (
