@@ -28,52 +28,66 @@ function toNum(raw: string | undefined | null): number {
 function generatePineScript(p: Props): string {
   const asset = p.asset ?? "ASSET";
   const tf    = p.timeframe ? ` · ${p.timeframe}` : "";
-  const dir   = (p.signal ?? "").toUpperCase() === "SHORT" ? "SELL" : "BUY";
   const conf  = p.confidence ?? 0;
-  const isBuy = dir === "BUY";
 
-  // Clean every price — the root fix for Problem 1 + 2
-  const entryN  = toNum(p.entry);
-  const slN     = toNum(p.stopLoss);
-  const tp1N    = toNum(p.takeProfit1);
+  const sig   = (p.signal ?? "").toUpperCase();
+  const dir   = sig === "SHORT" ? "SHORT" : sig === "NEUTRAL" ? "NEUTRAL" : "LONG";
+  const isBuy = dir !== "SHORT";
 
-  // If a real TP2 was supplied, use it; otherwise project by the same distance as TP1
-  const tp2Raw  = toNum(p.takeProfit2);
-  const tp2N    = tp2Raw && tp2Raw !== tp1N
+  // Strip commas from every price before any numeric operation
+  const entryN = toNum(p.entry);
+  const slN    = toNum(p.stopLoss);
+  const tp1N   = toNum(p.takeProfit1);
+  const tp2Raw = toNum(p.takeProfit2);
+  const tp2N   = tp2Raw && tp2Raw !== tp1N
     ? tp2Raw
     : isBuy
-      ? tp1N + (tp1N - entryN)   // project above TP1
-      : tp1N - (entryN - tp1N);  // project below TP1
+      ? tp1N + (tp1N - entryN)
+      : tp1N - (entryN - tp1N);
 
-  // Format for Pine Script — plain decimals, no commas
+  const grade = conf >= 90 ? "A+" : conf >= 80 ? "A" : conf >= 70 ? "B" : "C";
+
+  // Plain decimal strings — no commas, no locale formatting
   const E  = entryN.toFixed(2);
   const SL = slN.toFixed(2);
   const T1 = tp1N.toFixed(2);
   const T2 = tp2N.toFixed(2);
 
   return `//@version=5
-indicator("ChartIQ Signal", overlay=true, max_lines_count=10, max_labels_count=10)
-// ChartIQ AI — ${asset}${tf}
-// Signal: ${dir} | Confidence: ${conf}%
+indicator("ChartIQ AI Signal", overlay=true, max_lines_count=20, max_labels_count=20)
+// ChartIQ AI — ${asset}${tf} | ${dir} | ${conf}% | Grade: ${grade}
 // trade-edge-ai.vercel.app
 
-// Price levels — no commas in numbers
+// Price levels
 var float entry_price = ${E}
 var float sl_price    = ${SL}
 var float tp1_price   = ${T1}
 var float tp2_price   = ${T2}
+var string signal_dir = "${dir}"
+var int confidence    = ${conf}
+var string grade      = "${grade}"
 
-// Draw horizontal lines
-var line entryLine = line.new(bar_index, entry_price, bar_index + 1, entry_price, extend=extend.both, color=color.white, style=line.style_solid, width=2)
-var line slLine    = line.new(bar_index, sl_price,    bar_index + 1, sl_price,    extend=extend.both, color=color.red,   style=line.style_dashed, width=2)
-var line tp1Line   = line.new(bar_index, tp1_price,   bar_index + 1, tp1_price,   extend=extend.both, color=color.lime,  style=line.style_dashed, width=2)
-var line tp2Line   = line.new(bar_index, tp2_price,   bar_index + 1, tp2_price,   extend=extend.both, color=color.green, style=line.style_dotted, width=1)
+// Colours
+var color entryCol = color.rgb(255, 255, 255)
+var color slCol    = color.rgb(255, 68, 68)
+var color tp1Col   = color.rgb(0, 230, 118)
+var color tp2Col   = color.rgb(0, 180, 90)
+
+// Entry zone background between entry and SL
+bgcolor(close >= math.min(entry_price, sl_price) and close <= math.max(entry_price, sl_price) ? color.rgb(0, 230, 118, 92) : na, title="Entry Zone")
+
+// Horizontal lines
+var line entryLine = line.new(bar_index - 100, entry_price, bar_index + 200, entry_price, extend=extend.right, color=entryCol, style=line.style_solid,  width=3)
+var line slLine    = line.new(bar_index - 100, sl_price,    bar_index + 200, sl_price,    extend=extend.right, color=slCol,    style=line.style_dashed, width=2)
+var line tp1Line   = line.new(bar_index - 100, tp1_price,   bar_index + 200, tp1_price,   extend=extend.right, color=tp1Col,   style=line.style_dashed, width=2)
+var line tp2Line   = line.new(bar_index - 100, tp2_price,   bar_index + 200, tp2_price,   extend=extend.right, color=tp2Col,   style=line.style_dotted, width=2)
 
 // Labels
-var label entryLabel = label.new(bar_index + 10, entry_price, "Entry: " + str.tostring(entry_price), color=color.white,  textcolor=color.black, style=label.style_label_left)
-var label slLabel    = label.new(bar_index + 10, sl_price,    "SL: "    + str.tostring(sl_price),    color=color.red,    textcolor=color.white, style=label.style_label_left)
-var label tp1Label   = label.new(bar_index + 10, tp1_price,   "TP1: "   + str.tostring(tp1_price),   color=color.lime,   textcolor=color.black, style=label.style_label_left)
-var label tp2Label   = label.new(bar_index + 10, tp2_price,   "TP2: "   + str.tostring(tp2_price),   color=color.green,  textcolor=color.white, style=label.style_label_left)
+var label entryLabel  = label.new(bar_index + 10, entry_price, "● ENTRY  "     + str.tostring(entry_price, "#.##"), xloc=xloc.bar_index, color=color.rgb(255, 255, 255, 10), textcolor=color.black, style=label.style_label_left, size=size.normal)
+var label slLabel     = label.new(bar_index + 10, sl_price,    "● STOP LOSS  " + str.tostring(sl_price,    "#.##"), xloc=xloc.bar_index, color=color.rgb(255, 68,  68,  10), textcolor=color.white, style=label.style_label_left, size=size.normal)
+var label tp1Label    = label.new(bar_index + 10, tp1_price,   "● TP1  "        + str.tostring(tp1_price,  "#.##"), xloc=xloc.bar_index, color=color.rgb(0,   230, 118, 10), textcolor=color.black, style=label.style_label_left, size=size.normal)
+var label tp2Label    = label.new(bar_index + 10, tp2_price,   "● TP2  "        + str.tostring(tp2_price,  "#.##"), xloc=xloc.bar_index, color=color.rgb(0,   180, 90,  10), textcolor=color.black, style=label.style_label_left, size=size.normal)
+var label signalLabel = label.new(bar_index + 10, tp1_price + (tp1_price - entry_price) * 0.5, "ChartIQ AI  |  " + signal_dir + "  |  " + str.tostring(confidence) + "% confidence  |  Grade: " + grade, xloc=xloc.bar_index, color=color.rgb(0, 230, 118, 10), textcolor=color.white, style=label.style_label_left, size=size.small)
 `;
 }
 
