@@ -1,0 +1,599 @@
+//@version=5
+strategy("ChartIQ AI Signal Strategy",
+  overlay=true,
+  initial_capital=10000,
+  default_qty_type=strategy.percent_of_equity,
+  default_qty_value=1,
+  commission_type=strategy.commission.percent,
+  commission_value=0.02,
+  slippage=2,
+  max_lines_count=500,
+  max_labels_count=500,
+  max_boxes_count=500)
+
+// ═══════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════
+
+// Capital Settings
+risk_per_trade = input.float(1.0,
+  "Risk Per Trade %",
+  minval=0.1, maxval=5.0, step=0.1,
+  group="Capital Management")
+use_atr_sl = input.bool(true,
+  "Use ATR Stop Loss",
+  group="Capital Management")
+atr_mult_sl = input.float(1.5,
+  "ATR Multiplier for SL",
+  minval=0.5, maxval=5.0, step=0.1,
+  group="Capital Management")
+tp1_rr = input.float(2.0,
+  "Take Profit 1 R:R",
+  minval=0.5, maxval=10.0, step=0.1,
+  group="Capital Management")
+tp2_rr = input.float(3.0,
+  "Take Profit 2 R:R",
+  minval=0.5, maxval=10.0, step=0.1,
+  group="Capital Management")
+use_partial_tp = input.bool(true,
+  "Use Partial Take Profit (50% at TP1)",
+  group="Capital Management")
+
+// Trend Settings
+ema_fast = input.int(20, "Fast EMA",
+  group="Trend Filter")
+ema_slow = input.int(50, "Slow EMA",
+  group="Trend Filter")
+ema_trend = input.int(200, "Trend EMA",
+  group="Trend Filter")
+require_trend = input.bool(true,
+  "Require Trend Alignment",
+  group="Trend Filter")
+
+// Confluence Settings
+min_confluence = input.int(3,
+  "Minimum Confluence (1-6)",
+  minval=1, maxval=6,
+  group="Signal Settings")
+use_rsi_filter = input.bool(true,
+  "Use RSI Filter",
+  group="Signal Settings")
+use_volume_filter = input.bool(true,
+  "Use Volume Filter",
+  group="Signal Settings")
+use_session_filter = input.bool(true,
+  "Use Session Filter",
+  group="Signal Settings")
+use_fvg = input.bool(true,
+  "Use FVG Confluence",
+  group="Signal Settings")
+use_ob = input.bool(true,
+  "Use Order Block Confluence",
+  group="Signal Settings")
+use_liq_sweep = input.bool(true,
+  "Use Liquidity Sweep Confluence",
+  group="Signal Settings")
+use_bos = input.bool(true,
+  "Use Break of Structure",
+  group="Signal Settings")
+
+// Session Settings
+london = input.bool(true,
+  "Trade London Session",
+  group="Sessions")
+newyork = input.bool(true,
+  "Trade New York Session",
+  group="Sessions")
+asian = input.bool(false,
+  "Trade Asian Session",
+  group="Sessions")
+
+// Trade Management
+use_breakeven = input.bool(true,
+  "Move to Breakeven at TP1",
+  group="Trade Management")
+use_trailing = input.bool(false,
+  "Use Trailing Stop after TP1",
+  group="Trade Management")
+trail_atr = input.float(1.0,
+  "Trailing Stop ATR",
+  minval=0.1, maxval=5.0,
+  group="Trade Management")
+max_trades_day = input.int(3,
+  "Max Trades Per Day",
+  minval=1, maxval=10,
+  group="Trade Management")
+max_open_trades = input.int(1,
+  "Max Simultaneous Trades",
+  minval=1, maxval=3,
+  group="Trade Management")
+
+// Date Range for Backtest
+start_date = input.time(
+  timestamp("2024-01-01"),
+  "Start Date",
+  group="Backtest Settings")
+end_date = input.time(
+  timestamp("2026-01-01"),
+  "End Date",
+  group="Backtest Settings")
+in_date_range = time >= start_date and
+  time <= end_date
+
+// ═══════════════════════════════════════
+// CORE CALCULATIONS
+// ═══════════════════════════════════════
+
+// EMAs
+ema20 = ta.ema(close, ema_fast)
+ema50 = ta.ema(close, ema_slow)
+ema200 = ta.ema(close, ema_trend)
+
+// Trend
+bull_trend = ema20 > ema50 and
+  ema50 > ema200
+bear_trend = ema20 < ema50 and
+  ema50 < ema200
+trend_ok_bull = require_trend ?
+  bull_trend : true
+trend_ok_bear = require_trend ?
+  bear_trend : true
+
+// RSI
+rsi = ta.rsi(close, 14)
+rsi_bull = use_rsi_filter ?
+  (rsi > 45 and rsi < 70) : true
+rsi_bear = use_rsi_filter ?
+  (rsi < 55 and rsi > 30) : true
+
+// Volume
+vol_avg = ta.sma(volume, 20)
+vol_confirm = use_volume_filter ?
+  volume > vol_avg * 1.1 : true
+
+// ATR
+atr = ta.atr(14)
+
+// Sessions
+london_session = not na(time("1440",
+  "0800-1700", "Europe/London"))
+ny_session = not na(time("1440",
+  "0830-1700", "America/New_York"))
+asian_session = not na(time("1440",
+  "0000-0900", "Asia/Tokyo"))
+
+active_session = (london and london_session) or
+  (newyork and ny_session) or
+  (asian and asian_session)
+session_ok = use_session_filter ?
+  active_session : true
+
+// ═══════════════════════════════════════
+// MARKET STRUCTURE
+// ═══════════════════════════════════════
+
+swing_high = ta.pivothigh(high, 5, 5)
+swing_low = ta.pivotlow(low, 5, 5)
+
+var float last_sh = na
+var float last_sl = na
+var float prev_sh = na
+var float prev_sl = na
+
+if not na(swing_high)
+    prev_sh := last_sh
+    last_sh := swing_high
+
+if not na(swing_low)
+    prev_sl := last_sl
+    last_sl := swing_low
+
+bos_bull = use_bos and
+  not na(prev_sh) and
+  close > prev_sh and
+  close[1] <= prev_sh
+
+bos_bear = use_bos and
+  not na(prev_sl) and
+  close < prev_sl and
+  close[1] >= prev_sl
+
+// ═══════════════════════════════════════
+// FAIR VALUE GAPS
+// ═══════════════════════════════════════
+
+bull_fvg_cond = use_fvg and
+  low > high[2] and
+  close[1] > high[2]
+bear_fvg_cond = use_fvg and
+  high < low[2] and
+  close[1] < low[2]
+
+var float bull_fvg_top = na
+var float bull_fvg_bot = na
+var float bear_fvg_top = na
+var float bear_fvg_bot = na
+
+if bull_fvg_cond
+    bull_fvg_top := low
+    bull_fvg_bot := high[2]
+
+if bear_fvg_cond
+    bear_fvg_top := low[2]
+    bear_fvg_bot := high
+
+in_bull_fvg = use_fvg and
+  not na(bull_fvg_bot) and
+  close >= bull_fvg_bot and
+  close <= bull_fvg_top
+
+in_bear_fvg = use_fvg and
+  not na(bear_fvg_bot) and
+  close >= bear_fvg_bot and
+  close <= bear_fvg_top
+
+// ═══════════════════════════════════════
+// ORDER BLOCKS
+// ═══════════════════════════════════════
+
+strong_bull_move = close > open and
+  (close - open) > atr * 1.5
+strong_bear_move = close < open and
+  (open - close) > atr * 1.5
+
+var float bull_ob_high = na
+var float bull_ob_low = na
+var float bear_ob_high = na
+var float bear_ob_low = na
+
+if use_ob and strong_bull_move and
+  close[1] < open[1]
+    bull_ob_high := high[1]
+    bull_ob_low := low[1]
+
+if use_ob and strong_bear_move and
+  close[1] > open[1]
+    bear_ob_high := high[1]
+    bear_ob_low := low[1]
+
+at_bull_ob = use_ob and
+  not na(bull_ob_low) and
+  close >= bull_ob_low and
+  close <= bull_ob_high
+
+at_bear_ob = use_ob and
+  not na(bear_ob_low) and
+  close >= bear_ob_low and
+  close <= bear_ob_high
+
+// ═══════════════════════════════════════
+// LIQUIDITY SWEEPS
+// ═══════════════════════════════════════
+
+lookback = 20
+liq_sweep_bull = use_liq_sweep and
+  low < ta.lowest(low, lookback)[1] and
+  close > ta.lowest(low, lookback)[1] and
+  close > open
+
+liq_sweep_bear = use_liq_sweep and
+  high > ta.highest(high, lookback)[1] and
+  close < ta.highest(high, lookback)[1] and
+  close < open
+
+// ═══════════════════════════════════════
+// CONFLUENCE SCORING
+// ═══════════════════════════════════════
+
+bull_c1 = trend_ok_bull ? 1 : 0
+bull_c2 = rsi_bull ? 1 : 0
+bull_c3 = vol_confirm ? 1 : 0
+bull_c4 = (in_bull_fvg or at_bull_ob) ? 1 : 0
+bull_c5 = liq_sweep_bull ? 1 : 0
+bull_c6 = bos_bull ? 1 : 0
+bull_score = bull_c1 + bull_c2 + bull_c3 +
+  bull_c4 + bull_c5 + bull_c6
+
+bear_c1 = trend_ok_bear ? 1 : 0
+bear_c2 = rsi_bear ? 1 : 0
+bear_c3 = vol_confirm ? 1 : 0
+bear_c4 = (in_bear_fvg or at_bear_ob) ? 1 : 0
+bear_c5 = liq_sweep_bear ? 1 : 0
+bear_c6 = bos_bear ? 1 : 0
+bear_score = bear_c1 + bear_c2 + bear_c3 +
+  bear_c4 + bear_c5 + bear_c6
+
+// ═══════════════════════════════════════
+// TRADE MANAGEMENT VARIABLES
+// ═══════════════════════════════════════
+
+var int trades_today = 0
+var int last_trade_day = na
+var bool tp1_hit = false
+var float entry_price_var = na
+var float sl_price_var = na
+
+// Reset daily trade counter
+current_day = dayofmonth
+if na(last_trade_day) or
+  current_day != last_trade_day
+    trades_today := 0
+    last_trade_day := current_day
+
+// Check if we can take more trades today
+can_trade = trades_today < max_trades_day and
+  strategy.opentrades < max_open_trades
+
+// ═══════════════════════════════════════
+// ENTRY CONDITIONS
+// ═══════════════════════════════════════
+
+buy_condition = bull_score >= min_confluence and
+  session_ok and
+  can_trade and
+  in_date_range and
+  strategy.position_size == 0
+
+sell_condition = bear_score >= min_confluence and
+  session_ok and
+  can_trade and
+  in_date_range and
+  strategy.position_size == 0
+
+// ═══════════════════════════════════════
+// STOP LOSS CALCULATION
+// ═══════════════════════════════════════
+
+calc_buy_sl() =>
+    if use_atr_sl
+        close - atr * atr_mult_sl
+    else
+        not na(last_sl) ? last_sl :
+          close - atr * 2
+
+calc_sell_sl() =>
+    if use_atr_sl
+        close + atr * atr_mult_sl
+    else
+        not na(last_sh) ? last_sh :
+          close + atr * 2
+
+// ═══════════════════════════════════════
+// STRATEGY EXECUTION
+// ═══════════════════════════════════════
+
+if buy_condition
+    buy_sl = calc_buy_sl()
+    buy_risk = close - buy_sl
+    buy_tp1 = close + buy_risk * tp1_rr
+    buy_tp2 = close + buy_risk * tp2_rr
+
+    entry_price_var := close
+    sl_price_var := buy_sl
+    tp1_hit := false
+    trades_today += 1
+
+    strategy.entry("Long", strategy.long,
+      comment="BUY " + str.tostring(bull_score) +
+      "/6")
+
+    if use_partial_tp
+        strategy.exit("Long TP1", "Long",
+          qty_percent=50,
+          limit=buy_tp1,
+          stop=buy_sl,
+          comment="TP1 Hit")
+        strategy.exit("Long TP2", "Long",
+          qty_percent=50,
+          limit=buy_tp2,
+          stop=buy_sl,
+          comment="TP2 Hit")
+    else
+        strategy.exit("Long Exit", "Long",
+          limit=buy_tp2,
+          stop=buy_sl,
+          comment="Exit")
+
+if sell_condition
+    sell_sl = calc_sell_sl()
+    sell_risk = sell_sl - close
+    sell_tp1 = close - sell_risk * tp1_rr
+    sell_tp2 = close - sell_risk * tp2_rr
+
+    entry_price_var := close
+    sl_price_var := sell_sl
+    tp1_hit := false
+    trades_today += 1
+
+    strategy.entry("Short", strategy.short,
+      comment="SELL " + str.tostring(bear_score) +
+      "/6")
+
+    if use_partial_tp
+        strategy.exit("Short TP1", "Short",
+          qty_percent=50,
+          limit=sell_tp1,
+          stop=sell_sl,
+          comment="TP1 Hit")
+        strategy.exit("Short TP2", "Short",
+          qty_percent=50,
+          limit=sell_tp2,
+          stop=sell_sl,
+          comment="TP2 Hit")
+    else
+        strategy.exit("Short Exit", "Short",
+          limit=sell_tp2,
+          stop=sell_sl,
+          comment="Exit")
+
+// ═══════════════════════════════════════
+// BREAKEVEN LOGIC
+// ═══════════════════════════════════════
+
+if use_breakeven and
+  strategy.position_size > 0 and
+  not na(entry_price_var)
+    risk = entry_price_var - sl_price_var
+    be_level = entry_price_var + risk * tp1_rr
+    if high >= be_level and not tp1_hit
+        tp1_hit := true
+        strategy.exit("Long BE", "Long",
+          stop=entry_price_var +
+          atr * 0.1,
+          comment="Breakeven")
+
+if use_breakeven and
+  strategy.position_size < 0 and
+  not na(entry_price_var)
+    risk = sl_price_var - entry_price_var
+    be_level = entry_price_var - risk * tp1_rr
+    if low <= be_level and not tp1_hit
+        tp1_hit := true
+        strategy.exit("Short BE", "Short",
+          stop=entry_price_var -
+          atr * 0.1,
+          comment="Breakeven")
+
+// ═══════════════════════════════════════
+// VISUAL ELEMENTS
+// ═══════════════════════════════════════
+
+bull_col = color.rgb(0, 230, 118)
+bear_col = color.rgb(255, 68, 68)
+
+// EMAs
+plot(ema20, "EMA 20",
+  color.new(bull_col, 60), 1)
+plot(ema50, "EMA 50",
+  color.new(bear_col, 60), 1)
+plot(ema200, "EMA 200",
+  color.white, 2)
+
+// Entry signals
+plotshape(buy_condition,
+  "BUY", shape.labelup,
+  location.belowbar,
+  bull_col, size=size.normal,
+  text="BUY\n" + str.tostring(bull_score) + "/6")
+
+plotshape(sell_condition,
+  "SELL", shape.labeldown,
+  location.abovebar,
+  bear_col, size=size.normal,
+  text="SELL\n" + str.tostring(bear_score) + "/6")
+
+// Min confluence reference line
+hline(min_confluence, "Min Confluence",
+  color.gray, linestyle=hline.style_dashed)
+
+// ═══════════════════════════════════════
+// PERFORMANCE DASHBOARD
+// ═══════════════════════════════════════
+
+var table perf = table.new(
+  position.bottom_right, 2, 8,
+  bgcolor=color.new(color.black, 20),
+  border_color=color.new(
+    color.rgb(0,230,118), 40),
+  border_width=1)
+
+if barstate.islast
+    win_rate = strategy.wintrades /
+      math.max(strategy.closedtrades, 1) * 100
+
+    table.cell(perf, 0, 0,
+      "ChartIQ Strategy Results",
+      text_color=color.rgb(0,230,118),
+      text_size=size.small,
+      bgcolor=color.new(
+        color.rgb(0,230,118), 80))
+    table.cell(perf, 1, 0, "",
+      bgcolor=color.new(
+        color.rgb(0,230,118), 80))
+
+    table.cell(perf, 0, 1, "Total Trades",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(perf, 1, 1,
+      str.tostring(strategy.closedtrades),
+      text_color=color.white,
+      text_size=size.small)
+
+    table.cell(perf, 0, 2, "Win Rate",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(perf, 1, 2,
+      str.tostring(math.round(win_rate)) + "%",
+      text_color=win_rate >= 50 ?
+        color.rgb(0,230,118) :
+        color.rgb(255,68,68),
+      text_size=size.small)
+
+    table.cell(perf, 0, 3, "Net Profit",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(perf, 1, 3,
+      str.tostring(math.round(
+        strategy.netprofit)) + " pts",
+      text_color=strategy.netprofit > 0 ?
+        color.rgb(0,230,118) :
+        color.rgb(255,68,68),
+      text_size=size.small)
+
+    table.cell(perf, 0, 4, "Profit Factor",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(perf, 1, 4,
+      str.tostring(math.round(
+        strategy.grossprofit /
+        math.max(math.abs(
+        strategy.grossloss), 1) * 100) / 100),
+      text_color=strategy.grossprofit >
+        math.abs(strategy.grossloss) ?
+        color.rgb(0,230,118) :
+        color.rgb(255,68,68),
+      text_size=size.small)
+
+    table.cell(perf, 0, 5, "Max Drawdown",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(perf, 1, 5,
+      str.tostring(math.round(
+        strategy.max_drawdown_percent *
+        100) / 100) + "%",
+      text_color=color.rgb(255,68,68),
+      text_size=size.small)
+
+    table.cell(perf, 0, 6, "Avg Win",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(perf, 1, 6,
+      str.tostring(math.round(
+        strategy.grossprofit /
+        math.max(strategy.wintrades, 1))),
+      text_color=color.rgb(0,230,118),
+      text_size=size.small)
+
+    table.cell(perf, 0, 7, "Avg Loss",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(perf, 1, 7,
+      str.tostring(math.round(
+        strategy.grossloss /
+        math.max(strategy.losstrades, 1))),
+      text_color=color.rgb(255,68,68),
+      text_size=size.small)
+
+// ═══════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════
+
+alertcondition(buy_condition,
+  "ChartIQ Strategy BUY",
+  "ChartIQ AI Strategy: BUY signal — " +
+  str.tostring(bull_score) + "/6 confluence")
+
+alertcondition(sell_condition,
+  "ChartIQ Strategy SELL",
+  "ChartIQ AI Strategy: SELL signal — " +
+  str.tostring(bear_score) + "/6 confluence")

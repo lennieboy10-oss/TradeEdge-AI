@@ -1,0 +1,571 @@
+//@version=5
+indicator("ChartIQ AI Signal System",
+  overlay=true,
+  max_lines_count=500,
+  max_labels_count=500,
+  max_boxes_count=500)
+
+// ═══════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════
+
+// Trend Settings
+ema_fast = input.int(20, "Fast EMA",
+  group="Trend Filter")
+ema_slow = input.int(50, "Slow EMA",
+  group="Trend Filter")
+ema_trend = input.int(200, "Trend EMA",
+  group="Trend Filter")
+
+// SMC Settings
+show_fvg = input.bool(true, "Show FVG Zones",
+  group="Smart Money")
+show_ob = input.bool(true, "Show Order Blocks",
+  group="Smart Money")
+show_liquidity = input.bool(true,
+  "Show Liquidity Levels",
+  group="Smart Money")
+show_bos = input.bool(true,
+  "Show Structure Breaks",
+  group="Smart Money")
+
+// Signal Settings
+min_confluence = input.int(3,
+  "Minimum Confluence Factors (1-6)",
+  minval=1, maxval=6,
+  group="Signal Settings")
+show_signals = input.bool(true,
+  "Show Buy/Sell Signals",
+  group="Signal Settings")
+signal_size = input.string("Normal",
+  "Signal Size",
+  options=["Tiny","Small","Normal","Large"],
+  group="Signal Settings")
+
+// Session Settings
+london = input.bool(true, "London Session",
+  group="Sessions")
+newyork = input.bool(true, "New York Session",
+  group="Sessions")
+asian = input.bool(false, "Asian Session",
+  group="Sessions")
+session_filter = input.bool(true,
+  "Only signal during active sessions",
+  group="Sessions")
+
+// Alert Settings
+alert_on_signal = input.bool(true,
+  "Alert on new signals",
+  group="Alerts")
+
+// Visual Settings
+bull_color = input.color(color.new(
+  color.rgb(0, 230, 118), 0),
+  "Bullish Color",
+  group="Visual")
+bear_color = input.color(color.new(
+  color.rgb(255, 68, 68), 0),
+  "Bearish Color",
+  group="Visual")
+show_emas = input.bool(true, "Show EMAs",
+  group="Visual")
+show_dashboard = input.bool(true,
+  "Show Dashboard",
+  group="Visual")
+
+// ═══════════════════════════════════════
+// CALCULATIONS
+// ═══════════════════════════════════════
+
+// EMAs
+ema20 = ta.ema(close, ema_fast)
+ema50 = ta.ema(close, ema_slow)
+ema200 = ta.ema(close, ema_trend)
+
+// Trend direction
+bull_trend = ema20 > ema50 and
+  ema50 > ema200
+bear_trend = ema20 < ema50 and
+  ema50 < ema200
+
+// RSI
+rsi = ta.rsi(close, 14)
+rsi_bull = rsi > 50 and rsi < 75
+rsi_bear = rsi < 50 and rsi > 25
+
+// Volume
+vol_avg = ta.sma(volume, 20)
+vol_confirm = volume > vol_avg * 1.2
+
+// ATR for stop loss calculation
+atr = ta.atr(14)
+
+// Sessions
+london_session = not na(time("1440",
+  "0800-1700", "Europe/London"))
+ny_session = not na(time("1440",
+  "0830-1700", "America/New_York"))
+asian_session = not na(time("1440",
+  "0000-0900", "Asia/Tokyo"))
+
+active_session = (london and london_session) or
+  (newyork and ny_session) or
+  (asian and asian_session)
+
+session_ok = session_filter ?
+  active_session : true
+
+// ═══════════════════════════════════════
+// MARKET STRUCTURE
+// ═══════════════════════════════════════
+
+// Swing highs and lows
+swing_high = ta.pivothigh(high, 5, 5)
+swing_low = ta.pivotlow(low, 5, 5)
+
+// Track last swing points
+var float last_sh = na
+var float last_sl = na
+var float prev_sh = na
+var float prev_sl = na
+
+if not na(swing_high)
+    prev_sh := last_sh
+    last_sh := swing_high
+
+if not na(swing_low)
+    prev_sl := last_sl
+    last_sl := swing_low
+
+// Break of Structure
+bos_bull = not na(prev_sh) and
+  close > prev_sh and
+  close[1] <= prev_sh
+bos_bear = not na(prev_sl) and
+  close < prev_sl and
+  close[1] >= prev_sl
+
+// Change of Character
+choch_bull = bear_trend and bos_bull
+choch_bear = bull_trend and bos_bear
+
+// ═══════════════════════════════════════
+// FAIR VALUE GAPS
+// ═══════════════════════════════════════
+
+// Bullish FVG: gap between candle 1 high
+// and candle 3 low
+bull_fvg = low > high[2] and
+  close[1] > high[2]
+bear_fvg = high < low[2] and
+  close[1] < low[2]
+
+// Track if price is in FVG zone
+var float bull_fvg_top = na
+var float bull_fvg_bot = na
+var float bear_fvg_top = na
+var float bear_fvg_bot = na
+
+if bull_fvg and show_fvg
+    bull_fvg_top := low
+    bull_fvg_bot := high[2]
+
+if bear_fvg and show_fvg
+    bear_fvg_top := low[2]
+    bear_fvg_bot := high
+
+// Price returning to FVG
+in_bull_fvg = not na(bull_fvg_bot) and
+  close >= bull_fvg_bot and
+  close <= bull_fvg_top
+in_bear_fvg = not na(bear_fvg_bot) and
+  close >= bear_fvg_bot and
+  close <= bear_fvg_top
+
+// ═══════════════════════════════════════
+// ORDER BLOCKS
+// ═══════════════════════════════════════
+
+// Bullish OB: last bearish candle before
+// a strong bullish move
+var float bull_ob_high = na
+var float bull_ob_low = na
+var float bear_ob_high = na
+var float bear_ob_low = na
+
+// Strong move detection
+strong_bull = close > open and
+  (close - open) > atr * 1.5
+strong_bear = close < open and
+  (open - close) > atr * 1.5
+
+// Last bearish candle before strong bull
+if strong_bull and close[1] < open[1]
+    bull_ob_high := high[1]
+    bull_ob_low := low[1]
+
+// Last bullish candle before strong bear
+if strong_bear and close[1] > open[1]
+    bear_ob_high := high[1]
+    bear_ob_low := low[1]
+
+// Price at order block
+at_bull_ob = not na(bull_ob_low) and
+  close >= bull_ob_low and
+  close <= bull_ob_high
+at_bear_ob = not na(bear_ob_low) and
+  close >= bear_ob_low and
+  close <= bear_ob_high
+
+// ═══════════════════════════════════════
+// LIQUIDITY LEVELS
+// ═══════════════════════════════════════
+
+// Equal highs and lows (liquidity pools)
+eq_high = math.abs(high - high[1]) <
+  atr * 0.1
+eq_low = math.abs(low - low[1]) <
+  atr * 0.1
+
+// Liquidity sweep detection
+liq_sweep_bull = low < ta.lowest(low, 20)[1]
+  and close > ta.lowest(low, 20)[1]
+liq_sweep_bear = high > ta.highest(high, 20)[1]
+  and close < ta.highest(high, 20)[1]
+
+// ═══════════════════════════════════════
+// CONFLUENCE SCORING
+// ═══════════════════════════════════════
+
+// Bull confluence factors
+bull_c1 = bull_trend ? 1 : 0
+bull_c2 = rsi_bull ? 1 : 0
+bull_c3 = vol_confirm ? 1 : 0
+bull_c4 = (in_bull_fvg or at_bull_ob) ? 1 : 0
+bull_c5 = liq_sweep_bull ? 1 : 0
+bull_c6 = bos_bull ? 1 : 0
+
+bull_confluence = bull_c1 + bull_c2 +
+  bull_c3 + bull_c4 + bull_c5 + bull_c6
+
+// Bear confluence factors
+bear_c1 = bear_trend ? 1 : 0
+bear_c2 = rsi_bear ? 1 : 0
+bear_c3 = vol_confirm ? 1 : 0
+bear_c4 = (in_bear_fvg or at_bear_ob) ? 1 : 0
+bear_c5 = liq_sweep_bear ? 1 : 0
+bear_c6 = bos_bear ? 1 : 0
+
+bear_confluence = bear_c1 + bear_c2 +
+  bear_c3 + bear_c4 + bear_c5 + bear_c6
+
+// ═══════════════════════════════════════
+// SIGNAL GENERATION
+// ═══════════════════════════════════════
+
+// Generate signals only when minimum
+// confluence factors met
+buy_signal = bull_confluence >= min_confluence
+  and session_ok
+  and not buy_signal[1]
+
+sell_signal = bear_confluence >= min_confluence
+  and session_ok
+  and not sell_signal[1]
+
+// Prevent signals in opposite direction
+// without structure change
+var bool in_long = false
+var bool in_short = false
+
+if buy_signal and not in_long
+    in_long := true
+    in_short := false
+
+if sell_signal and not in_short
+    in_short := true
+    in_long := false
+
+// Final signals
+final_buy = buy_signal and not in_long[1]
+final_sell = sell_signal and not in_short[1]
+
+// ═══════════════════════════════════════
+// STOP LOSS AND TAKE PROFIT
+// ═══════════════════════════════════════
+
+// Dynamic SL based on ATR and structure
+buy_sl = not na(last_sl) ?
+  math.min(last_sl, low - atr) :
+  low - atr * 1.5
+
+sell_sl = not na(last_sh) ?
+  math.max(last_sh, high + atr) :
+  high + atr * 1.5
+
+// TP at 2R and 3R
+buy_tp1 = close + (close - buy_sl) * 2
+buy_tp2 = close + (close - buy_sl) * 3
+sell_tp1 = close - (sell_sl - close) * 2
+sell_tp2 = close - (sell_sl - close) * 3
+
+// ═══════════════════════════════════════
+// VISUAL ELEMENTS
+// ═══════════════════════════════════════
+
+// Plot EMAs
+plot(show_emas ? ema20 : na,
+  "EMA 20", color.new(bull_color, 50), 1)
+plot(show_emas ? ema50 : na,
+  "EMA 50", color.new(bear_color, 50), 1)
+plot(show_emas ? ema200 : na,
+  "EMA 200", color.white, 2)
+
+// Buy and sell signals
+label_size = signal_size == "Tiny" ?
+  size.tiny : signal_size == "Small" ?
+  size.small : signal_size == "Large" ?
+  size.large : size.normal
+
+if final_buy and show_signals
+    label.new(bar_index, low - atr * 0.5,
+      "▲ BUY\n" + str.tostring(bull_confluence) +
+      "/6 confluence",
+      color=bull_color,
+      textcolor=color.black,
+      style=label.style_label_up,
+      size=label_size)
+
+if final_sell and show_signals
+    label.new(bar_index, high + atr * 0.5,
+      "▼ SELL\n" + str.tostring(bear_confluence) +
+      "/6 confluence",
+      color=bear_color,
+      textcolor=color.white,
+      style=label.style_label_down,
+      size=label_size)
+
+// Structure breaks
+if show_bos and bos_bull
+    label.new(bar_index, low,
+      "BOS ▲",
+      color=color.new(bull_color, 70),
+      textcolor=bull_color,
+      style=label.style_label_up,
+      size=size.tiny)
+
+if show_bos and bos_bear
+    label.new(bar_index, high,
+      "BOS ▼",
+      color=color.new(bear_color, 70),
+      textcolor=bear_color,
+      style=label.style_label_down,
+      size=size.tiny)
+
+// Liquidity sweeps
+if liq_sweep_bull
+    label.new(bar_index, low,
+      "Sweep",
+      color=color.new(color.orange, 70),
+      textcolor=color.orange,
+      style=label.style_label_up,
+      size=size.tiny)
+
+if liq_sweep_bear
+    label.new(bar_index, high,
+      "Sweep",
+      color=color.new(color.orange, 70),
+      textcolor=color.orange,
+      style=label.style_label_down,
+      size=size.tiny)
+
+// FVG Boxes
+if bull_fvg and show_fvg
+    box.new(bar_index - 2, bull_fvg_top,
+      bar_index + 20, bull_fvg_bot,
+      border_color=color.new(bull_color, 70),
+      bgcolor=color.new(bull_color, 85),
+      border_width=1)
+
+if bear_fvg and show_fvg
+    box.new(bar_index - 2, bear_fvg_top,
+      bar_index + 20, bear_fvg_bot,
+      border_color=color.new(bear_color, 70),
+      bgcolor=color.new(bear_color, 85),
+      border_width=1)
+
+// Order Block Boxes
+if not na(bull_ob_high) and show_ob
+    box.new(bar_index - 1, bull_ob_high,
+      bar_index + 30, bull_ob_low,
+      border_color=color.new(bull_color, 40),
+      bgcolor=color.new(bull_color, 80),
+      border_width=2)
+
+if not na(bear_ob_high) and show_ob
+    box.new(bar_index - 1, bear_ob_high,
+      bar_index + 30, bear_ob_low,
+      border_color=color.new(bear_color, 40),
+      bgcolor=color.new(bear_color, 80),
+      border_width=2)
+
+// ═══════════════════════════════════════
+// DASHBOARD TABLE
+// ═══════════════════════════════════════
+
+if show_dashboard
+    var table dash = table.new(
+      position.top_right, 2, 10,
+      bgcolor=color.new(color.black, 20),
+      border_color=color.new(
+        color.rgb(0,230,118), 50),
+      border_width=1,
+      frame_color=color.new(
+        color.rgb(0,230,118), 30),
+      frame_width=1)
+
+    // Header
+    table.cell(dash, 0, 0, "ChartIQ AI",
+      text_color=color.rgb(0,230,118),
+      text_size=size.small,
+      bgcolor=color.new(
+        color.rgb(0,230,118), 80))
+    table.cell(dash, 1, 0, "Signal System",
+      text_color=color.rgb(0,230,118),
+      text_size=size.small,
+      bgcolor=color.new(
+        color.rgb(0,230,118), 80))
+
+    // Trend
+    table.cell(dash, 0, 1, "Trend",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 1,
+      bull_trend ? "BULLISH" :
+      bear_trend ? "BEARISH" : "NEUTRAL",
+      text_color=bull_trend ?
+        color.rgb(0,230,118) :
+        bear_trend ? color.rgb(255,68,68) :
+        color.gray,
+      text_size=size.small)
+
+    // RSI
+    table.cell(dash, 0, 2, "RSI",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 2,
+      str.tostring(math.round(rsi)),
+      text_color=rsi > 70 ?
+        color.rgb(255,68,68) :
+        rsi < 30 ? color.rgb(0,230,118) :
+        color.white,
+      text_size=size.small)
+
+    // Volume
+    table.cell(dash, 0, 3, "Volume",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 3,
+      vol_confirm ? "HIGH" : "Normal",
+      text_color=vol_confirm ?
+        color.rgb(0,230,118) : color.gray,
+      text_size=size.small)
+
+    // Session
+    table.cell(dash, 0, 4, "Session",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 4,
+      london_session ? "London" :
+      ny_session ? "New York" :
+      asian_session ? "Asian" : "Closed",
+      text_color=active_session ?
+        color.rgb(0,230,118) : color.gray,
+      text_size=size.small)
+
+    // Bull Confluence
+    table.cell(dash, 0, 5, "Bull Score",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 5,
+      str.tostring(bull_confluence) + "/6",
+      text_color=bull_confluence >= 4 ?
+        color.rgb(0,230,118) :
+        bull_confluence >= 2 ?
+        color.orange : color.gray,
+      text_size=size.small)
+
+    // Bear Confluence
+    table.cell(dash, 0, 6, "Bear Score",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 6,
+      str.tostring(bear_confluence) + "/6",
+      text_color=bear_confluence >= 4 ?
+        color.rgb(255,68,68) :
+        bear_confluence >= 2 ?
+        color.orange : color.gray,
+      text_size=size.small)
+
+    // Signal
+    table.cell(dash, 0, 7, "Signal",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 7,
+      in_long ? "LONG" :
+      in_short ? "SHORT" : "WAIT",
+      text_color=in_long ?
+        color.rgb(0,230,118) :
+        in_short ? color.rgb(255,68,68) :
+        color.gray,
+      text_size=size.small)
+
+    // FVG Status
+    table.cell(dash, 0, 8, "FVG",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 8,
+      in_bull_fvg ? "Bull FVG" :
+      in_bear_fvg ? "Bear FVG" : "None",
+      text_color=in_bull_fvg ?
+        color.rgb(0,230,118) :
+        in_bear_fvg ? color.rgb(255,68,68) :
+        color.gray,
+      text_size=size.small)
+
+    // Order Block Status
+    table.cell(dash, 0, 9, "Order Block",
+      text_color=color.white,
+      text_size=size.small)
+    table.cell(dash, 1, 9,
+      at_bull_ob ? "Bull OB" :
+      at_bear_ob ? "Bear OB" : "None",
+      text_color=at_bull_ob ?
+        color.rgb(0,230,118) :
+        at_bear_ob ? color.rgb(255,68,68) :
+        color.gray,
+      text_size=size.small)
+
+// ═══════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════
+
+alertcondition(final_buy,
+  "ChartIQ BUY Signal",
+  "ChartIQ AI: BUY signal detected — " +
+  str.tostring(bull_confluence) +
+  "/6 confluence factors aligned")
+
+alertcondition(final_sell,
+  "ChartIQ SELL Signal",
+  "ChartIQ AI: SELL signal detected — " +
+  str.tostring(bear_confluence) +
+  "/6 confluence factors aligned")
+
+alertcondition(liq_sweep_bull or liq_sweep_bear,
+  "ChartIQ Liquidity Sweep",
+  "ChartIQ AI: Liquidity sweep detected — potential reversal incoming")
+
+alertcondition(bos_bull or bos_bear,
+  "ChartIQ Structure Break",
+  "ChartIQ AI: Break of Structure detected")
