@@ -41,14 +41,15 @@ const RESOURCES_ITEMS = [
   { label: "Pine Script Library",  href: "/tools/pine-scripts", icon: "📜" },
   { label: "Broker Connections",   href: "/brokers",             icon: "🔗" },
   { label: "Setup Guides",         href: "/#guides",             icon: "📖" },
+  { label: "Account",              href: "/account",             icon: "👤" },
 ];
 
 const AVATAR_ITEMS = [
-  { label: "Dashboard",          href: "/dashboard"  },
-  { label: "Journal",            href: "/journal"    },
-  { label: "Account",            href: "/account"    },
+  { label: "Dashboard",          href: "/dashboard"   },
+  { label: "Journal",            href: "/journal"     },
+  { label: "Account",            href: "/account"     },
   { label: "Achievements",       href: "/achievements" },
-  { label: "Broker Connections", href: "/brokers"    },
+  { label: "Broker Connections", href: "/brokers"     },
 ];
 
 // ── Dropdown panel ─────────────────────────────────────────────
