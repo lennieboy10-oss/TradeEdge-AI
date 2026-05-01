@@ -1805,33 +1805,24 @@ function ChatBox({ journalId, analysisJson, chartBase64, chartMime, clientId, is
 
 // ── Welcome modal (shows once per device to non-logged-in users) ──
 function WelcomeModal({ onClose }: { onClose: () => void }) {
-  const proFeatures = [
-    "Unlimited chart analyses",
-    "Confidence score and trade grade",
-    "Multi-timeframe analysis",
-    "Trade journal with win rate tracking",
-    "Watchlist with email alerts",
-    "Economic calendar",
-    "Risk calculator",
-    "Follow-up AI chat on every chart",
-  ];
+  function pick(plan: "free" | "trial") {
+    localStorage.setItem("ciq_presignup_plan", plan);
+    onClose();
+    window.location.href = "/signup";
+  }
+
+  const freeFeatures  = ["5 analyses to get started", "Basic signal + entry/SL/TP", "Confidence score", "Risk calculator"];
+  const trialFeatures = ["Unlimited analyses for 7 days", "All Pro features unlocked", "SMC analysis & confluences", "Journal, watchlist, calendar"];
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}>
+      style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)" }}>
       <motion.div
-        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        initial={{ opacity: 0, scale: 0.93, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
-        className="relative max-w-md w-full rounded-2xl p-7 overflow-hidden"
-        style={{
-          background: "#0d1310",
-          border: "1px solid rgba(0,230,118,0.35)",
-          boxShadow: "0 0 60px rgba(0,230,118,0.15), 0 24px 64px rgba(0,0,0,0.6)",
-        }}>
-        {/* Glow orb */}
-        <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full pointer-events-none"
-          style={{ background: "radial-gradient(circle, rgba(0,230,118,0.12) 0%, transparent 70%)" }} />
+        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+        className="relative w-full max-w-2xl rounded-2xl p-7 overflow-hidden"
+        style={{ background: "#0a0d14", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 32px 80px rgba(0,0,0,0.7)" }}>
 
         {/* Close */}
         <button onClick={onClose}
@@ -1841,45 +1832,71 @@ function WelcomeModal({ onClose }: { onClose: () => void }) {
           </svg>
         </button>
 
-        {/* Top section */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-[#00e676]/40 bg-[#00e676]/10 text-[#00e676] text-[10px] font-bold tracking-widest uppercase mb-4">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00e676] animate-pulse" />
-            LIMITED TIME
-          </div>
-          <h2 className="font-bebas text-[44px] leading-none tracking-[0.03em] text-white mb-2">
-            7 DAYS FREE PRO ACCESS
+        {/* Header */}
+        <div className="text-center mb-7">
+          <h2 className="font-bebas text-[clamp(36px,5vw,52px)] leading-none tracking-[0.04em] text-white mb-2">
+            CHOOSE HOW TO START
           </h2>
-          <p className="text-[#6b7280] text-sm">No credit card required. Cancel any time.</p>
+          <p className="text-[#6b7280] text-sm">No credit card required · Upgrade or change anytime</p>
         </div>
 
-        {/* Feature list */}
-        <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 mb-5">
-          <p className="text-[#6b7280] text-[11px] font-semibold uppercase tracking-[0.12em] mb-3">
-            Everything in Pro free for 7 days:
-          </p>
-          <ul className="grid grid-cols-2 gap-x-3 gap-y-2">
-            {proFeatures.map((f) => (
-              <li key={f} className="flex items-start gap-1.5 text-xs text-[#d1d5db]">
-                <span className="text-[#00e676] flex-shrink-0 mt-0.5">✅</span>
-                {f}
-              </li>
-            ))}
-          </ul>
+        {/* Cards */}
+        <div className="grid sm:grid-cols-2 gap-4">
+
+          {/* Free card */}
+          <div className="rounded-xl p-5 flex flex-col"
+            style={{ background: "#0c0f18", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <span className="font-dm-mono text-[9px] font-bold tracking-widest px-2 py-0.5 rounded-full self-start mb-3"
+              style={{ background: "rgba(255,255,255,0.06)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.09)" }}>
+              FREE
+            </span>
+            <div className="text-2xl mb-2">🎯</div>
+            <h3 className="font-bold text-white text-base mb-1">Start Free</h3>
+            <p className="text-[#6b7280] text-xs mb-4">No time limit, get started now</p>
+            <ul className="space-y-1.5 mb-5 flex-1">
+              {freeFeatures.map(f => (
+                <li key={f} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                  <span className="text-[#00e676] flex-shrink-0">✓</span>{f}
+                </li>
+              ))}
+            </ul>
+            <button onClick={() => pick("free")}
+              className="w-full py-3 rounded-xl text-sm font-bold border transition-all hover:bg-white/[0.06] hover:text-white"
+              style={{ borderColor: "rgba(255,255,255,0.13)", color: "#9ca3af" }}>
+              Start free
+            </button>
+          </div>
+
+          {/* Pro Trial card */}
+          <div className="rounded-xl p-5 flex flex-col relative overflow-hidden"
+            style={{ background: "linear-gradient(135deg,#0c1810,#0a1a12)", border: "1px solid rgba(0,230,118,0.35)", boxShadow: "0 0 30px rgba(0,230,118,0.08)" }}>
+            <div className="absolute top-0 right-0 w-28 h-28 rounded-full pointer-events-none"
+              style={{ background: "radial-gradient(circle,rgba(0,230,118,0.09) 0%,transparent 70%)" }} />
+            <span className="font-dm-mono text-[9px] font-bold tracking-widest px-2 py-0.5 rounded-full self-start mb-3"
+              style={{ background: "rgba(0,230,118,0.15)", color: "#00e676", border: "1px solid rgba(0,230,118,0.3)" }}>
+              RECOMMENDED
+            </span>
+            <div className="text-2xl mb-2">⚡</div>
+            <h3 className="font-bold text-white text-base mb-1">Try Pro Free</h3>
+            <p className="text-[#9ca3af] text-xs mb-4">Full Pro access, no card needed</p>
+            <ul className="space-y-1.5 mb-5 flex-1">
+              {trialFeatures.map(f => (
+                <li key={f} className="flex items-center gap-2 text-xs text-[#d1d5db]">
+                  <span className="text-[#00e676] flex-shrink-0">✓</span>{f}
+                </li>
+              ))}
+            </ul>
+            <button onClick={() => pick("trial")}
+              className="w-full py-3 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
+              style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 18px rgba(0,230,118,0.35)" }}>
+              Start 7-day trial →
+            </button>
+            <p className="text-center font-dm-mono text-[9px] text-[#4b5563] mt-1.5">No credit card required</p>
+          </div>
         </div>
 
-        {/* CTA */}
-        <a href="/signup"
-          onClick={onClose}
-          className="block w-full py-3.5 rounded-xl text-sm font-bold text-center transition-all duration-200 hover:-translate-y-0.5 mb-3"
-          style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 24px rgba(0,230,118,0.4)" }}>
-          Start my free trial →
-        </a>
-        <p className="text-center text-[#4b5563] text-xs mb-1">
-          Join 2,400+ traders already using ChartIQ
-        </p>
-        <p className="text-center text-[#374151] text-[10px]">
-          7 day free trial · Then £19/mo · Cancel any time
+        <p className="text-center text-[#374151] text-[10px] mt-5">
+          Join 2,400+ traders · 7-day trial then £19/mo · Cancel anytime
         </p>
       </motion.div>
     </div>

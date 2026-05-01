@@ -78,35 +78,45 @@ export default function SignupPage() {
       return;
     }
 
-    if (data.user?.id) setUserId(data.user.id);
+    const uid = data.user?.id ?? null;
+    if (uid) setUserId(uid);
     setHasSession(!!data.session);
-    setStep("plan");
+
+    // If they already picked a plan on the home page popup, skip the plan step
+    const prePlan = localStorage.getItem("ciq_presignup_plan") as PlanChoice | null;
+    if (prePlan === "free" || prePlan === "trial") {
+      localStorage.removeItem("ciq_presignup_plan");
+      setChosenPlan(prePlan);
+      await applyPlan(prePlan, uid, !!data.session);
+    } else {
+      setStep("plan");
+    }
   }
 
-  async function choosePlan(plan: PlanChoice) {
-    setPlanLoading(plan);
-    setChosenPlan(plan);
-
+  async function applyPlan(plan: PlanChoice, uid: string | null, session: boolean) {
     const trialEndsAt = plan === "trial"
       ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       : null;
-
     try {
       await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, email, plan, trialEndsAt }),
+        body: JSON.stringify({ userId: uid, email, plan, trialEndsAt }),
       });
     } catch { /* non-fatal */ }
-
     localStorage.setItem("ciq_signup_plan", plan);
-
-    if (hasSession) {
+    if (session) {
       router.replace(`/?welcome=${plan}`);
     } else {
       setPlanLoading(null);
       setStep("done");
     }
+  }
+
+  async function choosePlan(plan: PlanChoice) {
+    setPlanLoading(plan);
+    setChosenPlan(plan);
+    await applyPlan(plan, userId, hasSession);
   }
 
   // ── Step 3: check email ──────────────────────────────────────
