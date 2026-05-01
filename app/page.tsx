@@ -2562,6 +2562,7 @@ export default function App() {
   const [showAnnualPricing, setShowAnnualPricing] = useState(false);
   const [showWelcome, setShowWelcome]             = useState(false);
   const [showTopBanner, setShowTopBanner]         = useState(false);
+  const [welcomePlan, setWelcomePlan]             = useState<"free" | "trial" | null>(null);
   const { plan, isPro: isPlanPro } = useUserPlan();
   const { user, loading: authLoading } = useAuth();
   const isPro = isPlanPro;
@@ -2598,6 +2599,14 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const preAsset = params.get("asset");
     if (preAsset) setAsset(decodeURIComponent(preAsset));
+
+    const welcome = params.get("welcome");
+    if (welcome === "free" || welcome === "trial") {
+      setWelcomePlan(welcome);
+      localStorage.removeItem("ciq_signup_plan");
+      // Strip the param from the URL without a reload
+      window.history.replaceState({}, "", window.location.pathname);
+    }
 
     // Fetch economic calendar (background, non-blocking)
     fetch("/api/calendar")
@@ -2799,6 +2808,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden">
+
+      {/* ── SIGNUP WELCOME BANNER ───────────────────────────── */}
+      {welcomePlan && (
+        <div className="fixed top-[88px] left-0 right-0 z-[45] flex justify-center px-4 pointer-events-none">
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.35 }}
+            className="pointer-events-auto flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl"
+            style={{
+              background: welcomePlan === "trial" ? "rgba(0,230,118,0.1)" : "rgba(255,255,255,0.06)",
+              border: welcomePlan === "trial" ? "1px solid rgba(0,230,118,0.3)" : "1px solid rgba(255,255,255,0.1)",
+              backdropFilter: "blur(12px)",
+            }}
+          >
+            <span className="text-lg">{welcomePlan === "trial" ? "⚡" : "🎯"}</span>
+            <p className="font-dm-mono text-[12px] font-semibold" style={{ color: welcomePlan === "trial" ? "#00e676" : "#e5e7eb" }}>
+              {welcomePlan === "trial"
+                ? "Pro trial activated! 7 days of unlimited access starts now."
+                : "Welcome! You have 5 free analyses to get started."}
+            </p>
+            <button onClick={() => setWelcomePlan(null)} className="text-[#4b5563] hover:text-white transition-colors ml-1">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              </svg>
+            </button>
+          </motion.div>
+        </div>
+      )}
 
       {/* ── WELCOME MODAL ───────────────────────────────────── */}
       {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}

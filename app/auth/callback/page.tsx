@@ -10,17 +10,20 @@ export default function AuthCallback() {
   useEffect(() => {
     const sb = getSupabaseBrowser();
 
-    // For hash-based tokens (email confirmation links), supabase-js auto-parses
-    // the URL hash and establishes a session. We just wait for it then redirect.
+    function redirect() {
+      const plan = localStorage.getItem("ciq_signup_plan");
+      const dest = plan ? `/?welcome=${plan}` : "/";
+      router.replace(dest);
+    }
+
     sb.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
-        router.replace("/");
+        redirect();
       }
     });
 
-    // If already signed in (e.g. navigated here directly), redirect immediately
     sb.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace("/");
+      if (data.session) redirect();
     });
   }, [router]);
 
