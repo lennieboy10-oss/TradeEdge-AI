@@ -39,6 +39,10 @@ const proFeatures = [
 
 const eliteFeatures = [
   "Everything in Pro",
+  "ChartIQ AI Signal System indicator",
+  "Unlimited indicator downloads",
+  "Future indicator updates — free",
+  "Priority indicator support",
   "MT4/MT5 Expert Advisor auto-trading",
   "Full automated signal system",
   "Configurable min confidence, lot size, sessions",
@@ -213,6 +217,35 @@ export default function PricingPage() {
               </button>
             </motion.div>
           </div>
+
+          {/* Elite indicator callout */}
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+            className="rounded-2xl p-6 mb-10 flex flex-col md:flex-row items-center gap-6"
+            style={{ background: "linear-gradient(135deg, #100d1f 0%, #0c0a18 100%)", border: "1.5px solid rgba(139,92,246,0.25)", boxShadow: "0 0 40px rgba(139,92,246,0.05)" }}>
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+                <path d="M3 19L8 12L12.5 15.5L18 7" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="21" cy="5" r="3" fill="#a78bfa" fillOpacity="0.6" />
+              </svg>
+            </div>
+            <div className="flex-1 text-center md:text-left">
+              <div className="flex items-center gap-2 justify-center md:justify-start mb-1">
+                <span className="text-xs font-bold tracking-[0.15em] uppercase px-2 py-0.5 rounded-full"
+                  style={{ background: "rgba(139,92,246,0.18)", color: "#a78bfa" }}>Elite Exclusive</span>
+              </div>
+              <p className="text-white font-bold text-base mb-1">ChartIQ AI Signal System</p>
+              <p className="text-[#6b7280] text-sm leading-relaxed">
+                Elite members get exclusive access to the most advanced buy/sell indicator for TradingView —
+                combining SMC, FVGs, order blocks, and liquidity analysis with a 6-factor confluence engine.
+              </p>
+            </div>
+            <Link href="/tools/elite-indicator"
+              className="flex-shrink-0 px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5 whitespace-nowrap"
+              style={{ background: "rgba(139,92,246,0.2)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.35)" }}>
+              Learn More
+            </Link>
+          </motion.div>
 
           {/* FAQ */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}

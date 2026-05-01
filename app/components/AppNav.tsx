@@ -23,12 +23,13 @@ function LogoMark() {
 type DropdownKey = "tools" | "community" | "resources" | "avatar" | null;
 
 const TOOLS_ITEMS = [
-  { label: "Chart Analyser",    href: "/",                  icon: "📊" },
-  { label: "Strategy Tester",   href: "/strategy-tester",   icon: "🧪" },
-  { label: "Risk Calculator",   href: "/calculator",         icon: "🎯" },
-  { label: "Economic Calendar", href: "/calendar",           icon: "📅" },
-  { label: "Watchlist",         href: "/watchlist",          icon: "⭐" },
-  { label: "Journal",           href: "/journal",            icon: "📓" },
+  { label: "Chart Analyser",    href: "/",                          icon: "📊" },
+  { label: "Strategy Tester",   href: "/strategy-tester",           icon: "🧪" },
+  { label: "Risk Calculator",   href: "/calculator",                icon: "🎯" },
+  { label: "Economic Calendar", href: "/calendar",                  icon: "📅" },
+  { label: "Watchlist",         href: "/watchlist",                 icon: "⭐" },
+  { label: "Journal",           href: "/journal",                   icon: "📓" },
+  { label: "Elite Indicator",   href: "/tools/elite-indicator",     icon: "🔮" },
 ];
 
 const COMMUNITY_ITEMS = [
