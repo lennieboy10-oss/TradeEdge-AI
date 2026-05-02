@@ -44,7 +44,7 @@ export async function POST(req: Request) {
         let plan = "pro";
         if (subscriptionId) {
           try {
-            const ELITE_PRICE_ID = process.env.STRIPE_ELITE_PRICE_ID ?? "price_1TSYQq3Xa1paguaYmYOmDlK1";
+            const ELITE_PRICE_ID = "price_1TSYQq3Xa1paguaYmYOmDlK1"; // £39.99/mo Elite — hardcoded
             const sub = await stripe.subscriptions.retrieve(subscriptionId);
             clientId  = sub.metadata?.client_id ?? null;
             const priceId = sub.items.data[0]?.price?.id;
@@ -85,7 +85,7 @@ export async function POST(req: Request) {
           // Detect plan from purchased price
           let plan = "pro";
           try {
-            const ELITE_PRICE_ID = process.env.STRIPE_ELITE_PRICE_ID ?? "price_1TSYQq3Xa1paguaYmYOmDlK1";
+            const ELITE_PRICE_ID = "price_1TSYQq3Xa1paguaYmYOmDlK1"; // £39.99/mo Elite — hardcoded
             const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
             const priceId   = lineItems.data[0]?.price?.id;
             if (priceId && priceId === ELITE_PRICE_ID) plan = "elite";

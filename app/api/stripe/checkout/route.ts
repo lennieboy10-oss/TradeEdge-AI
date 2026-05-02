@@ -8,8 +8,8 @@ export async function POST(req: Request) {
   try {
     const { clientId, email, annual, elite, plan } = await req.json();
 
-    // Price IDs — env vars preferred, hardcoded as fallback so production never routes wrong
-    const ELITE_PRICE   = process.env.STRIPE_ELITE_PRICE_ID   ?? "price_1TSYQq3Xa1paguaYmYOmDlK1";
+    // Elite price is hardcoded — do NOT use env var override (wrong var in Vercel = wrong price)
+    const ELITE_PRICE   = "price_1TSYQq3Xa1paguaYmYOmDlK1"; // £39.99/mo Elite
     const PRO_PRICE     = process.env.STRIPE_PRO_MONTHLY_PRICE_ID ?? process.env.STRIPE_PRICE_ID!;
     const PRO_ANN_PRICE = process.env.STRIPE_PRO_ANNUAL_PRICE_ID  ?? process.env.STRIPE_PRICE_ID!;
 
