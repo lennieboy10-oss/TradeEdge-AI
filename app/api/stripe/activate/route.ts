@@ -27,21 +27,26 @@ export async function POST(req: Request) {
     const email      = session.customer_email ?? null;
     const customerId = typeof session.customer === "string" ? session.customer : null;
 
+    // Determine plan from the price purchased
+    const lineItems  = await stripe.checkout.sessions.listLineItems(sessionId, { limit: 1 });
+    const priceId    = lineItems.data[0]?.price?.id ?? "";
+    const plan       = priceId === process.env.STRIPE_ELITE_PRICE_ID ? "elite" : "pro";
+
     const { data, error } = await getSupabase()
       .from("profiles")
       .upsert(
-        { client_id: clientId, email, plan: "pro", stripe_customer_id: customerId },
+        { client_id: clientId, email, plan, stripe_customer_id: customerId },
         { onConflict: "client_id" }
       )
       .select("id, client_id, plan");
 
-    console.log("[stripe/activate] Plan upgraded to pro for:", email, "result:", data, error);
+    console.log("[stripe/activate] Plan upgraded to", plan, "for:", email, "result:", data, error);
 
     if (error) {
       return NextResponse.json({ plan: "free", error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ plan: "pro", success: true });
+    return NextResponse.json({ plan, success: true });
   } catch (err) {
     console.error("[stripe/activate] failed:", err);
     return NextResponse.json({ plan: "free", error: "Activation failed" }, { status: 500 });
