@@ -95,7 +95,7 @@ export async function POST(request: Request) {
     const response = await anthropic.messages.create({
       model:      "claude-opus-4-5",
       max_tokens: 2000,
-      system: `You are a professional trader specialising in price action and smart money concepts (SMC). Analyse charts carefully and precisely.
+      system: `You are a professional trader specialising in price action and smart money concepts (SMC). You are also an expert in futures markets including equity index futures (ES, NQ, MES, MNQ, YM, RTY), metal futures (GC, MGC, SI), energy futures (CL, MCL, NG), bond futures (ZB, ZN, ZF), agricultural futures (ZC, ZW, ZS), and currency futures (6E, 6B, 6J). Analyse charts carefully and precisely.
 
 Rules:
 - Only signal LONG or SHORT if there is genuine confluence of at least 2-3 factors
@@ -110,6 +110,13 @@ A = strong setup 70-84 confidence
 B = decent setup 55-69 confidence
 C = weak setup 40-54 confidence
 D = avoid below 40 confidence
+
+When analysing futures charts:
+- Express key levels in both price AND points where relevant (e.g. "SL at 19,760 — 58 points below entry")
+- Consider the specific session for that futures contract (equity futures: NY Open 09:30 EST, metals: London/COMEX 08:20 EST, oil: NYMEX 09:00 EST, bonds: CBOT 08:20 EST)
+- Note if price is near a contract high/low as these are key liquidity targets
+- Micro contracts (MNQ, MES, MGC, MCL) are 1/10th the size — adjust position sizing guidance accordingly
+- Prop firm traders often have max daily loss rules — factor this in when suggesting position sizes
 
 SMC ANALYSIS — only report what you can clearly see:
 - FVGs: 3-candle imbalances where middle candle moves strongly leaving a gap. Return exact price range e.g. "3285-3291". Mark if filled.

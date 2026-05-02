@@ -17,6 +17,11 @@ const FALLBACK: TickerItem[] = [
   { label: "TSLA",    price: "281.90",   change: -1.32 },
   { label: "SPX500",  price: "5,648.10", change:  0.22 },
   { label: "OIL/USD", price: "64.78",    change: -0.45 },
+  { label: "ES1!",    price: "5,648",    change:  0.22 },
+  { label: "NQ1!",    price: "19,820",   change:  0.44 },
+  { label: "GC1!",    price: "3,312",    change:  0.38 },
+  { label: "CL1!",    price: "64.78",    change: -0.45 },
+  { label: "ZB1!",    price: "118.31",   change: -0.18 },
 ];
 
 export default function TickerBar() {

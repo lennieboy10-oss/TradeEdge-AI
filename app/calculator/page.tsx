@@ -3,13 +3,15 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import AppNav from "@/app/components/AppNav";
+import { detectFutures, getFuturesSymbol, type FuturesSpec } from "@/app/lib/futures-specs";
 
-type CalcAssetType = "forex" | "crypto" | "stocks" | "gold";
+type CalcAssetType = "forex" | "crypto" | "stocks" | "gold" | "futures";
 type CalcCurrency  = "GBP" | "USD" | "EUR";
 const CURRENCY_SYMBOLS: Record<CalcCurrency, string> = { GBP: "£", USD: "$", EUR: "€" };
 
 function detectCalcAsset(asset: string): CalcAssetType {
   const up = (asset ?? "").toUpperCase().replace(/\s/g, "");
+  if (detectFutures(asset)) return "futures";
   if (up.includes("XAU") || up.includes("GOLD") || up.includes("OIL") || up.includes("WTI")) return "gold";
   const cryptoKeys = ["BTC","ETH","SOL","DOGE","ADA","XRP","AVAX","LTC","LINK","DOT","BNB","MATIC"];
   if (cryptoKeys.some((c) => up.includes(c))) return "crypto";
@@ -22,7 +24,22 @@ function parseNum(s: string): number {
   return isNaN(n) ? 0 : n;
 }
 
-type CalcResult = { sizeLabel: string; profit1: number; rr1: number; marginRequired: number; slPips?: number };
+type CalcResult = {
+  sizeLabel: string;
+  profit1: number;
+  rr1: number;
+  marginRequired: number;
+  slPips?: number;
+  // futures-specific
+  contracts?: number;
+  rawContracts?: number;
+  dollarRiskPerContract?: number;
+  pointsAtRisk?: number;
+  ticksAtRisk?: number;
+  spec?: FuturesSpec;
+  microContracts?: number;
+  microDollarRisk?: number;
+};
 
 function doCalc(
   type: CalcAssetType, riskAmt: number, entry: number, sl: number, tp: number, asset: string
@@ -31,6 +48,46 @@ function doCalc(
   const tpDist = Math.abs(tp - entry);
   if (slDist === 0 || entry === 0) return null;
   const rr1 = tpDist / slDist;
+
+  if (type === "futures") {
+    const spec = detectFutures(asset);
+    if (!spec) return null;
+    const pointsAtRisk = slDist;
+    const ticksAtRisk  = pointsAtRisk / spec.tickSize;
+    const dollarRiskPerContract = ticksAtRisk * spec.tickValue;
+    const rawContracts = riskAmt / dollarRiskPerContract;
+    const contracts    = Math.floor(rawContracts);
+    const profitDollars = contracts > 0
+      ? (tpDist / spec.tickSize) * spec.tickValue * contracts
+      : 0;
+    // Micro alternative
+    let microContracts: number | undefined;
+    let microDollarRisk: number | undefined;
+    if (spec.microSymbol) {
+      const microSpec = detectFutures(spec.microSymbol);
+      if (microSpec) {
+        const microTicksAtRisk = pointsAtRisk / microSpec.tickSize;
+        const microRiskPerContract = microTicksAtRisk * microSpec.tickValue;
+        microContracts = Math.floor(riskAmt / microRiskPerContract);
+        microDollarRisk = microRiskPerContract;
+      }
+    }
+    return {
+      sizeLabel: `${contracts} contract${contracts !== 1 ? "s" : ""}`,
+      profit1: profitDollars,
+      rr1,
+      marginRequired: contracts * spec.margin,
+      contracts,
+      rawContracts,
+      dollarRiskPerContract,
+      pointsAtRisk,
+      ticksAtRisk,
+      spec,
+      microContracts,
+      microDollarRisk,
+    };
+  }
+
   if (type === "forex") {
     const isJpy     = asset.toUpperCase().includes("JPY");
     const pipSize   = isJpy ? 0.01 : 0.0001;
@@ -49,6 +106,7 @@ function doCalc(
     const shares = Math.max(1, Math.floor(riskAmt / slDist));
     return { sizeLabel: `${shares.toLocaleString()} shares`, profit1: tpDist * shares, rr1, marginRequired: shares * entry * 0.25 };
   }
+  // gold / commodities
   const oz = riskAmt / slDist;
   return { sizeLabel: `${oz.toFixed(2)} oz`, profit1: tpDist * oz, rr1, marginRequired: oz * entry * 0.005 };
 }
@@ -88,6 +146,32 @@ function WhatIfScenarios({
   );
 }
 
+function FuturesContractInfo({ spec, symbol }: { spec: FuturesSpec; symbol: string }) {
+  return (
+    <div className="rounded-xl p-4 mb-4"
+      style={{ background: "rgba(0,230,118,0.04)", border: "1px solid rgba(0,230,118,0.15)" }}>
+      <p className="font-dm-mono text-[9px] uppercase tracking-[0.15em] text-[#00e676] font-bold mb-2">
+        Detected: {spec.name} ({symbol})
+      </p>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+        {[
+          { label: "Exchange",    value: spec.exchange },
+          { label: "Tick size",   value: `${spec.tickSize} points` },
+          { label: "Tick value",  value: `$${spec.tickValue.toFixed(2)}` },
+          { label: "Point value", value: `$${spec.pointValue.toFixed(0)}` },
+          { label: "Typical margin", value: `$${spec.margin.toLocaleString()}` },
+          { label: "Best session",   value: spec.bestSession },
+        ].map((r) => (
+          <div key={r.label} className="flex justify-between items-center">
+            <span className="font-dm-mono text-[10px] text-[#6b7280]">{r.label}</span>
+            <span className="font-dm-mono text-[10px] font-bold text-white">{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function CalculatorPage() {
   const [clientId, setClientId] = useState<string | null>(null);
   const [isPro, setIsPro]       = useState(false);
@@ -100,6 +184,10 @@ export default function CalculatorPage() {
   const [slStr, setSlStr]         = useState("");
   const [tp1Str, setTp1Str]       = useState("");
   const [assetType, setAssetType] = useState<CalcAssetType>("forex");
+
+  // Tick calculator
+  const [tickEntry, setTickEntry] = useState("");
+  const [tickStop,  setTickStop]  = useState("");
 
   useEffect(() => {
     const id = localStorage.getItem("ciq_client_id");
@@ -130,11 +218,22 @@ export default function CalculatorPage() {
     ? doCalc(assetType, riskAmount, entryVal, slVal, tp1Val, assetStr)
     : null;
 
+  const futuresSpec   = assetType === "futures" ? detectFutures(assetStr) : null;
+  const futuresSymbol = assetType === "futures" ? getFuturesSymbol(assetStr) : "";
+
   const slDist   = Math.abs(entryVal - slVal);
   const tp1Dist  = Math.abs(tp1Val - entryVal);
   const totalD   = slDist + tp1Dist;
   const slBarPct = totalD > 0 ? (slDist / totalD) * 100 : 50;
   const tpBarPct = 100 - slBarPct;
+
+  // Tick calculator values
+  const tickEntryVal = parseNum(tickEntry);
+  const tickStopVal  = parseNum(tickStop);
+  const tickSpec     = futuresSpec;
+  const tickPoints   = tickSpec && tickEntryVal && tickStopVal ? Math.abs(tickEntryVal - tickStopVal) : null;
+  const tickTicks    = tickPoints && tickSpec ? tickPoints / tickSpec.tickSize : null;
+  const tickDollar   = tickTicks && tickSpec ? tickTicks * tickSpec.tickValue : null;
 
   const inputBase = "w-full px-3 py-2.5 rounded-xl font-dm-mono text-sm text-white focus:outline-none transition-colors";
 
@@ -146,20 +245,17 @@ export default function CalculatorPage() {
 
   return (
     <div className="min-h-screen bg-[#080a10] text-white">
-      {/* Nav */}
       <AppNav />
 
       <main className="pt-28 pb-20 px-6">
         <div className="max-w-2xl mx-auto">
-          {/* Header */}
           <div className="mb-10">
             <p className="font-dm-mono text-[10px] uppercase tracking-[0.2em] text-[#00e676] mb-2">Position Sizing</p>
             <h1 className="font-bebas text-[52px] leading-none tracking-[0.04em] text-white mb-3">
               POSITION CALCULATOR
             </h1>
             <p className="text-[#6b7280] text-sm leading-relaxed max-w-md">
-              Plan any trade before you open it. Enter your account size, risk tolerance,
-              and price levels to get exact position sizing.
+              Plan any trade before you open it. Supports forex, crypto, stocks, commodities, and futures contracts.
             </p>
           </div>
 
@@ -174,12 +270,12 @@ export default function CalculatorPage() {
               <div className="flex-1 min-w-[160px]">
                 <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#6b7280] font-semibold mb-1.5">Asset / Symbol</p>
                 <input type="text" value={assetStr} onChange={(e) => setAssetStr(e.target.value)}
-                  placeholder="EUR/USD, BTC/USD, AAPL…"
+                  placeholder="EUR/USD, BTC/USD, NQ, ES, GC…"
                   className={`${inputBase} focus:border-[#00e676]/60`}
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
               </div>
               <div className="flex gap-1.5 flex-wrap">
-                {(["forex", "crypto", "stocks", "gold"] as const).map((t) => (
+                {(["forex", "crypto", "stocks", "gold", "futures"] as const).map((t) => (
                   <button key={t} onClick={() => setAssetType(t)}
                     className="font-dm-mono text-[10px] uppercase px-2.5 py-2.5 rounded-lg border transition-all"
                     style={assetType === t
@@ -190,6 +286,11 @@ export default function CalculatorPage() {
                 ))}
               </div>
             </div>
+
+            {/* Futures contract info */}
+            {assetType === "futures" && futuresSpec && (
+              <FuturesContractInfo spec={futuresSpec} symbol={futuresSymbol} />
+            )}
 
             {/* Account + risk */}
             <div className="grid grid-cols-2 gap-3 mb-5">
@@ -227,7 +328,7 @@ export default function CalculatorPage() {
               <div>
                 <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#6b7280] font-semibold mb-1.5">Entry Price</p>
                 <input type="text" value={entryStr} onChange={(e) => setEntryStr(e.target.value)}
-                  placeholder="1.08450"
+                  placeholder={assetType === "futures" ? "19818.00" : "1.08450"}
                   className={`${inputBase} focus:border-[#00e676]/60`}
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
               </div>
@@ -235,7 +336,7 @@ export default function CalculatorPage() {
               <div>
                 <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#f87171] font-semibold mb-1.5">Stop Loss</p>
                 <input type="text" value={slStr} onChange={(e) => setSlStr(e.target.value)}
-                  placeholder="1.08100"
+                  placeholder={assetType === "futures" ? "19760.00" : "1.08100"}
                   className={`${inputBase} focus:border-[#f87171]/60`}
                   style={{ background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.14)" }} />
               </div>
@@ -243,7 +344,7 @@ export default function CalculatorPage() {
               <div className="col-span-2">
                 <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#4ade80] font-semibold mb-1.5">Take Profit</p>
                 <input type="text" value={tp1Str} onChange={(e) => setTp1Str(e.target.value)}
-                  placeholder="1.09150"
+                  placeholder={assetType === "futures" ? "19934.00" : "1.09150"}
                   className={`${inputBase} focus:border-[#4ade80]/60`}
                   style={{ background: "rgba(74,222,128,0.04)", border: "1px solid rgba(74,222,128,0.14)" }} />
               </div>
@@ -252,41 +353,123 @@ export default function CalculatorPage() {
             {/* Results */}
             {calc ? (
               <div className="space-y-4">
+                {/* Main P&L cards */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-2xl p-5 text-center"
                     style={{ background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.15)" }}>
                     <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#f87171] font-semibold mb-2">Max Loss</p>
-                    <p className="font-dm-mono text-[32px] font-bold text-[#f87171] leading-none">{sym}{riskAmount.toFixed(2)}</p>
+                    <p className="font-dm-mono text-[32px] font-bold text-[#f87171] leading-none">{sym}{riskAmount.toFixed(0)}</p>
                     <p className="font-dm-mono text-[10px] text-[#4b5563] mt-1.5">{riskPct}% of balance</p>
                   </div>
                   <div className="rounded-2xl p-5 text-center"
                     style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
                     <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#00e676] font-semibold mb-2">Potential Profit</p>
-                    <p className="font-dm-mono text-[32px] font-bold text-[#00e676] leading-none">{sym}{calc.profit1.toFixed(2)}</p>
+                    <p className="font-dm-mono text-[32px] font-bold text-[#00e676] leading-none">{sym}{calc.profit1.toFixed(0)}</p>
                     <p className="font-dm-mono text-[10px] text-[#4b5563] mt-1.5">RR 1:{calc.rr1.toFixed(2)}</p>
                   </div>
                 </div>
 
-                <div className={`grid gap-3 ${assetType === "forex" ? "grid-cols-3" : "grid-cols-2"}`}>
-                  <div className="rounded-xl p-3 text-center"
-                    style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                    <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Position Size</p>
-                    <p className="font-dm-mono text-sm font-bold text-white">{calc.sizeLabel}</p>
+                {/* Futures-specific breakdown */}
+                {assetType === "futures" && calc.spec && (
+                  <div className="space-y-3">
+                    {/* Contracts breakdown */}
+                    <div className="rounded-xl p-4"
+                      style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-3">Contract Breakdown</p>
+                      <div className="space-y-2">
+                        {[
+                          { label: "Points at risk",            value: `${calc.pointsAtRisk?.toFixed(2)} pts` },
+                          { label: "Ticks at risk",             value: `${calc.ticksAtRisk?.toFixed(0)} ticks` },
+                          { label: "Dollar risk / contract",    value: `$${calc.dollarRiskPerContract?.toFixed(2)}` },
+                          { label: "Contracts",                 value: `${calc.contracts} ${futuresSymbol}`, highlight: true },
+                          { label: "Margin required",           value: `$${calc.marginRequired.toLocaleString()}` },
+                          { label: "Account used in margin",    value: `${((calc.marginRequired / balVal) * 100).toFixed(1)}%`,
+                            warn: (calc.marginRequired / balVal) > 0.5 },
+                          { label: "Dollar profit at TP",       value: `$${((tp1Dist / (calc.spec?.tickSize ?? 1)) * (calc.spec?.tickValue ?? 1) * (calc.contracts ?? 0)).toFixed(0)}` },
+                        ].map((r) => (
+                          <div key={r.label} className="flex justify-between items-center">
+                            <span className="font-dm-mono text-[10px] text-[#6b7280]">{r.label}</span>
+                            <span className={`font-dm-mono text-[10px] font-bold ${r.highlight ? "text-[#00e676]" : r.warn ? "text-[#fbbf24]" : "text-white"}`}>
+                              {r.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Warning: 0 contracts */}
+                    {(calc.contracts ?? 0) === 0 && (
+                      <div className="rounded-xl p-3"
+                        style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.22)" }}>
+                        <p className="font-dm-mono text-[10px] text-[#fbbf24] font-bold mb-1">Minimum 1 contract</p>
+                        <p className="font-dm-mono text-[10px] text-[#6b7280]">
+                          1 {futuresSymbol} risks ${calc.dollarRiskPerContract?.toFixed(0)} ({((calc.dollarRiskPerContract ?? 0) / balVal * 100).toFixed(1)}% of account) — reduce stop distance or increase account size
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Margin warning */}
+                    {(calc.contracts ?? 0) > 0 && calc.marginRequired / balVal > 0.5 && (
+                      <div className="rounded-xl p-3"
+                        style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.22)" }}>
+                        <p className="font-dm-mono text-[10px] text-[#fbbf24]">
+                          Margin exceeds 50% of account — consider reducing contracts
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Micro alternative */}
+                    {calc.spec.microSymbol && calc.microDollarRisk && (
+                      <div className="rounded-xl p-4"
+                        style={{ background: "rgba(0,230,118,0.03)", border: "1px solid rgba(0,230,118,0.12)" }}>
+                        <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#00e676] mb-2">
+                          Micro Alternative — {calc.spec.microSymbol}
+                        </p>
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between">
+                            <span className="font-dm-mono text-[10px] text-[#6b7280]">Risk per micro contract</span>
+                            <span className="font-dm-mono text-[10px] text-white font-bold">${calc.microDollarRisk.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-dm-mono text-[10px] text-[#6b7280]">Recommended contracts</span>
+                            <span className="font-dm-mono text-[10px] text-[#00e676] font-bold">{calc.microContracts} {calc.spec.microSymbol}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-dm-mono text-[10px] text-[#6b7280]">Total risk</span>
+                            <span className="font-dm-mono text-[10px] text-white font-bold">
+                              ${((calc.microContracts ?? 0) * calc.microDollarRisk).toFixed(0)} ({(((calc.microContracts ?? 0) * calc.microDollarRisk) / balVal * 100).toFixed(2)}%)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  {assetType === "forex" && calc.slPips !== undefined && (
+                )}
+
+                {/* Non-futures size + SL pips */}
+                {assetType !== "futures" && (
+                  <div className={`grid gap-3 ${assetType === "forex" ? "grid-cols-3" : "grid-cols-2"}`}>
                     <div className="rounded-xl p-3 text-center"
                       style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                      <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">SL Pips</p>
-                      <p className="font-dm-mono text-sm font-bold text-white">{calc.slPips.toFixed(0)}</p>
+                      <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Position Size</p>
+                      <p className="font-dm-mono text-sm font-bold text-white">{calc.sizeLabel}</p>
                     </div>
-                  )}
-                  <div className="rounded-xl p-3 text-center"
-                    style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                    <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Margin Est.</p>
-                    <p className="font-dm-mono text-sm font-bold text-white">{sym}{calc.marginRequired.toFixed(0)}</p>
+                    {assetType === "forex" && calc.slPips !== undefined && (
+                      <div className="rounded-xl p-3 text-center"
+                        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">SL Pips</p>
+                        <p className="font-dm-mono text-sm font-bold text-white">{calc.slPips.toFixed(0)}</p>
+                      </div>
+                    )}
+                    <div className="rounded-xl p-3 text-center"
+                      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Margin Est.</p>
+                      <p className="font-dm-mono text-sm font-bold text-white">{sym}{calc.marginRequired.toFixed(0)}</p>
+                    </div>
                   </div>
-                </div>
+                )}
 
+                {/* Risk/reward bar */}
                 <div>
                   <div className="flex justify-between font-dm-mono text-[10px] mb-1.5">
                     <span className="text-[#f87171]">Risk {slBarPct.toFixed(0)}%</span>
@@ -345,8 +528,53 @@ export default function CalculatorPage() {
             )}
           </motion.div>
 
+          {/* Tick Calculator — shown when futures selected */}
+          {assetType === "futures" && futuresSpec && (
+            <motion.div
+              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+              className="mt-6 p-6 rounded-2xl"
+              style={{ background: "#0d1310", border: "1px solid rgba(0,230,118,0.1)" }}>
+              <p className="font-dm-mono text-[10px] uppercase tracking-[0.18em] text-[#00e676] font-bold mb-4">Tick Calculator</p>
+              <p className="text-[#6b7280] text-xs mb-4">How many ticks is my stop?</p>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#6b7280] font-semibold mb-1.5">Entry</p>
+                  <input type="text" value={tickEntry} onChange={(e) => setTickEntry(e.target.value)}
+                    placeholder="19818.00"
+                    className={`${inputBase} focus:border-[#00e676]/60`}
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
+                </div>
+                <div>
+                  <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#f87171] font-semibold mb-1.5">Stop</p>
+                  <input type="text" value={tickStop} onChange={(e) => setTickStop(e.target.value)}
+                    placeholder="19760.00"
+                    className={`${inputBase} focus:border-[#f87171]/60`}
+                    style={{ background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.14)" }} />
+                </div>
+              </div>
+              {tickPoints !== null && tickTicks !== null && tickDollar !== null ? (
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: "Points", value: tickPoints.toFixed(2) },
+                    { label: "Ticks",  value: tickTicks.toFixed(0) },
+                    { label: "$/contract", value: `$${tickDollar.toFixed(2)}` },
+                  ].map((r) => (
+                    <div key={r.label} className="rounded-xl p-3 text-center"
+                      style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.12)" }}>
+                      <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">{r.label}</p>
+                      <p className="font-dm-mono text-sm font-bold text-[#00e676]">{r.value}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="font-dm-mono text-[#4b5563] text-xs text-center">Enter entry and stop prices above</p>
+              )}
+            </motion.div>
+          )}
+
           <p className="font-dm-mono text-[10px] text-center text-[#4b5563] mt-6">
-            Margin estimates are approximate. Always verify with your broker. · <a href="/#analyze" className="hover:text-[#6b7280] transition-colors">Analyze a chart →</a>
+            Margin estimates are approximate. Always verify with your broker. ·{" "}
+            <a href="/#analyze" className="hover:text-[#6b7280] transition-colors">Analyze a chart →</a>
           </p>
         </div>
       </main>

@@ -7,7 +7,7 @@ import { ProLockedPage } from "../components/ProLockedPage";
 import AppNav from "../components/AppNav";
 
 type TradingStyle = "scalping" | "day" | "swing";
-type FilterChip = "all" | "scalping" | "day" | "swing" | "ict" | "price-action" | "indicators" | "classic";
+type FilterChip = "all" | "scalping" | "day" | "swing" | "ict" | "price-action" | "indicators" | "classic" | "futures";
 
 interface StrategyInput {
   id: string;
@@ -328,6 +328,114 @@ const STRATEGIES: Strategy[] = [
       { id: "atr_mult",     label: "Position N (ATR ×)",  type: "number", default: 2,  min: 1,  max: 5 },
     ],
   },
+  // ── Futures Strategies ───────────────────────────────────────
+  {
+    id: "ny-open-nq",
+    name: "ICT New York Open — NQ/ES",
+    description: "Buy or sell the first pullback after the 09:30 EST NY open on NQ or ES. Wait for a 5m FVG to form in the first 15 minutes then enter on the return to the FVG. Target 20–30 points on NQ with 10-point stop.",
+    categories: ["futures", "ict", "scalping"],
+    style: ["scalping", "day"],
+    defaultTimeframe: "5m",
+    defaultLookback: 30,
+    winRate: 64,
+    avgRR: 2.5,
+    communityTrades: 2841,
+    communityVotes: 187,
+    stars: 4.6,
+    icon: "⚡",
+    color: "#00e676",
+    inputs: [
+      { id: "open_hour",   label: "NY Open Hour (EST)",    type: "number", default: 9,  min: 8, max: 11 },
+      { id: "tp_points",   label: "Target Points (NQ)",    type: "number", default: 25, min: 10, max: 60 },
+      { id: "sl_points",   label: "Stop Points (NQ)",      type: "number", default: 10, min: 5, max: 25 },
+      { id: "fvg_min_pts", label: "Min FVG Size (points)", type: "number", default: 5,  min: 2, max: 20 },
+    ],
+  },
+  {
+    id: "gold-london-open",
+    name: "Gold Futures London Open",
+    description: "Buy GC or MGC at the London open (08:00 UTC) when price is above VWAP and RSI is above 50. Target previous session high. Stop below session low.",
+    categories: ["futures", "day"],
+    style: ["scalping", "day"],
+    defaultTimeframe: "15m",
+    defaultLookback: 30,
+    winRate: 58,
+    avgRR: 2.0,
+    communityTrades: 1924,
+    communityVotes: 143,
+    stars: 4.2,
+    icon: "🪙",
+    color: "#ffd740",
+    inputs: [
+      { id: "london_open_utc", label: "London Open (UTC Hour)", type: "number", default: 8,  min: 7, max: 9 },
+      { id: "rsi_min",         label: "Min RSI",                type: "number", default: 50, min: 45, max: 60 },
+      { id: "min_rr",          label: "Min R:R",                type: "number", default: 2,  min: 1, max: 4 },
+    ],
+  },
+  {
+    id: "crude-oil-inventory",
+    name: "Crude Oil Inventory Play — CL",
+    description: "On Wednesday at 10:30 EST (EIA inventory report) wait for the initial spike then fade the move. If price spikes up then reverses below the pre-report level — SELL. Stop above the spike high.",
+    categories: ["futures", "scalping"],
+    style: ["scalping"],
+    defaultTimeframe: "1m",
+    defaultLookback: 14,
+    winRate: 52,
+    avgRR: 3.2,
+    communityTrades: 987,
+    communityVotes: 76,
+    stars: 3.9,
+    icon: "🛢️",
+    color: "#f97316",
+    inputs: [
+      { id: "report_hour", label: "Report Hour EST",       type: "number", default: 10,  min: 9, max: 11 },
+      { id: "spike_bars",  label: "Wait Bars After Spike", type: "number", default: 3,   min: 1, max: 10 },
+      { id: "min_rr",      label: "Min R:R",               type: "number", default: 3,   min: 1, max: 5 },
+    ],
+  },
+  {
+    id: "bond-trend-follow",
+    name: "Bond Futures Trend Follow — ZB/ZN",
+    description: "On ZB or ZN daily chart buy when price breaks above 20-day high. Trail stop at 10-day low. Target 2–3 points. Best during Fed uncertainty periods.",
+    categories: ["futures", "classic"],
+    style: ["swing"],
+    defaultTimeframe: "1D",
+    defaultLookback: 180,
+    winRate: 48,
+    avgRR: 4.1,
+    communityTrades: 734,
+    communityVotes: 58,
+    stars: 4.0,
+    icon: "📈",
+    color: "#60a5fa",
+    inputs: [
+      { id: "breakout_days", label: "Breakout Period (days)", type: "number", default: 20, min: 10, max: 55 },
+      { id: "trail_days",    label: "Trail Stop (days)",      type: "number", default: 10, min: 5,  max: 20 },
+      { id: "target_points", label: "Target Points",         type: "number", default: 2.5, min: 1, max: 5 },
+    ],
+  },
+  {
+    id: "micro-scalp",
+    name: "Micro Futures Scalp — MNQ/MES",
+    description: "For smaller accounts use MNQ or MES. Scalp 5–10 points during NY open first hour. Look for order blocks on 1m chart with RSI divergence. Maximum 2 contracts per trade.",
+    categories: ["futures", "ict", "scalping"],
+    style: ["scalping"],
+    defaultTimeframe: "1m",
+    defaultLookback: 14,
+    winRate: 61,
+    avgRR: 1.8,
+    communityTrades: 3210,
+    communityVotes: 221,
+    stars: 4.4,
+    icon: "🔬",
+    color: "#a78bfa",
+    inputs: [
+      { id: "target_points", label: "Target Points (NQ pts)", type: "number", default: 8,  min: 3, max: 20 },
+      { id: "sl_points",     label: "Stop Points",            type: "number", default: 4,  min: 2, max: 10 },
+      { id: "max_contracts", label: "Max Contracts",          type: "number", default: 2,  min: 1, max: 5 },
+      { id: "rsi_div",       label: "RSI Divergence Period",  type: "number", default: 14, min: 7, max: 21 },
+    ],
+  },
 ];
 
 const STYLE_SETTINGS: Record<TradingStyle, { timeframes: string[]; lookback: number; label: string; description: string }> = {
@@ -587,6 +695,7 @@ export default function StrategyTesterPage() {
 
   const filterChips: { id: FilterChip; label: string }[] = [
     { id: "all",          label: "All" },
+    { id: "futures",      label: "Futures" },
     { id: "scalping",     label: "Scalping" },
     { id: "day",          label: "Day Trading" },
     { id: "swing",        label: "Swing" },

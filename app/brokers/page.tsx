@@ -292,22 +292,139 @@ export default function BrokersPage() {
             </div>
           </section>
 
-          {/* ── SECTION 3: Coming Soon ─── */}
-          <section>
+          {/* ── SECTION 3: Futures Brokers ─── */}
+          <section className="mb-12">
             <div className="flex items-center gap-3 mb-5">
               <p className="font-dm-mono text-[10px] font-bold tracking-[0.18em] uppercase text-[#6b7280]">Section 3</p>
+              <div className="h-px flex-1 bg-white/[0.06]" />
+              <p className="font-dm-mono text-[11px] font-bold tracking-widest text-white">Futures Brokers</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[
+                {
+                  name: "Interactive Brokers",
+                  subtitle: "All futures markets",
+                  icon: "🏦",
+                  color: "#ef4444",
+                  bg: "rgba(239,68,68,0.1)",
+                  border: "rgba(239,68,68,0.2)",
+                  badge: "Best for serious traders",
+                  badgeColor: "#ef4444",
+                  features: [
+                    "Lowest futures commission ($0.85/contract)",
+                    "All CME, CBOT, NYMEX, COMEX contracts",
+                    "Professional API with full data feed",
+                    "Micro contracts supported",
+                  ],
+                },
+                {
+                  name: "Tradovate",
+                  subtitle: "Futures specialist",
+                  icon: "📊",
+                  color: "#3b82f6",
+                  bg: "rgba(59,130,246,0.1)",
+                  border: "rgba(59,130,246,0.2)",
+                  badge: "Best for active traders",
+                  badgeColor: "#3b82f6",
+                  features: [
+                    "Monthly subscription pricing (unlimited trades)",
+                    "Cloud-based — trade from any device",
+                    "Good REST API for integration",
+                    "DOM and order flow tools built in",
+                  ],
+                },
+                {
+                  name: "NinjaTrader",
+                  subtitle: "Futures & forex automation",
+                  icon: "🥷",
+                  color: "#8b5cf6",
+                  bg: "rgba(139,92,246,0.1)",
+                  border: "rgba(139,92,246,0.2)",
+                  badge: "Best for automation",
+                  badgeColor: "#8b5cf6",
+                  features: [
+                    "Free platform — pay commissions only",
+                    "NinjaScript for full automation",
+                    "Extensive backtesting environment",
+                    "Supports MNQ, MES, MGC and more",
+                  ],
+                },
+                {
+                  name: "Topstep / FTMO (Prop Firms)",
+                  subtitle: "Funded account programmes",
+                  icon: "🏆",
+                  color: "#f59e0b",
+                  bg: "rgba(245,158,11,0.1)",
+                  border: "rgba(245,158,11,0.2)",
+                  badge: "Best for undercapitalised traders",
+                  badgeColor: "#f59e0b",
+                  features: [
+                    "Trade with $50k–$150k funded account",
+                    "Pass evaluation to access firm capital",
+                    "Keep 80% of profits",
+                    "No personal capital at risk beyond eval fee",
+                  ],
+                },
+              ].map((b, idx) => (
+                <motion.div key={b.name}
+                  initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 + idx * 0.07 }}
+                  className="rounded-2xl border p-6"
+                  style={{ borderColor: b.border, background: "#0a0d14" }}>
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+                        style={{ background: b.bg, border: `1px solid ${b.border}` }}>
+                        {b.icon}
+                      </div>
+                      <div>
+                        <p className="font-bold text-white">{b.name}</p>
+                        <p className="text-[#6b7280] text-xs">{b.subtitle}</p>
+                      </div>
+                    </div>
+                    <span className="font-dm-mono text-[9px] font-bold tracking-wider px-2 py-0.5 rounded-full flex-shrink-0"
+                      style={{ background: b.bg, color: b.badgeColor, border: `1px solid ${b.border}` }}>
+                      {b.badge}
+                    </span>
+                  </div>
+                  <ul className="space-y-1.5 mb-5">
+                    {b.features.map((f) => (
+                      <li key={f} className="flex items-start gap-2 text-xs text-[#6b7280]">
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="flex-shrink-0 mt-0.5">
+                          <path d="M2 5.5l2 2.5L9 2" stroke={b.color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex items-center justify-between">
+                    <span className="font-dm-mono text-[9px] font-bold tracking-widest px-2 py-1 rounded-full"
+                      style={{ background: "rgba(251,191,36,0.1)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.2)" }}>
+                      Direct integration coming soon
+                    </span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </section>
+
+          {/* ── SECTION 4: Coming Soon ─── */}
+          <section>
+            <div className="flex items-center gap-3 mb-5">
+              <p className="font-dm-mono text-[10px] font-bold tracking-[0.18em] uppercase text-[#6b7280]">Section 4</p>
               <div className="h-px flex-1 bg-white/[0.06]" />
               <p className="font-dm-mono text-[11px] font-bold tracking-widest text-[#4b5563]">Coming Soon</p>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {[
-                { name: "Interactive Brokers", icon: "🏦" },
                 { name: "Trading 212", icon: "🟢" },
-                { name: "cTrader", icon: "📉" },
-                { name: "NinjaTrader", icon: "🥷" },
-                { name: "eToro", icon: "🟢" },
+                { name: "cTrader",     icon: "📉" },
+                { name: "eToro",       icon: "🌿" },
                 { name: "ThinkOrSwim", icon: "🤔" },
+                { name: "Sierra Chart",icon: "📊" },
+                { name: "Rithmic",     icon: "🔌" },
               ].map((b) => (
                 <div key={b.name}
                   className="rounded-2xl border border-white/[0.04] p-4 flex items-center gap-3 opacity-40">

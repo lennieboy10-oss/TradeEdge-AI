@@ -39,9 +39,10 @@ const COMMUNITY_ITEMS = [
 ];
 
 const RESOURCES_ITEMS = [
-  { label: "Pine Script Library",  href: "/tools/pine-scripts", icon: "📜" },
-  { label: "Broker Connections",   href: "/brokers",             icon: "🔗" },
-  { label: "Setup Guides",         href: "/#guides",             icon: "📖" },
+  { label: "Pine Script Library",  href: "/tools/pine-scripts",        icon: "📜" },
+  { label: "Broker Connections",   href: "/brokers",                   icon: "🔗" },
+  { label: "Futures Guide",        href: "/resources/futures-guide",   icon: "📈" },
+  { label: "Setup Guides",         href: "/#guides",                   icon: "📖" },
 ];
 
 const AVATAR_ITEMS = [

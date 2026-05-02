@@ -2941,7 +2941,7 @@ export default function App() {
                 THE SMARTEST WAY<br />TO READ ANY<br /><span className="text-[#00e676]">CHART</span>
               </h1>
               <p className="animate-fade-up delay-200 text-[#9ca3af] text-lg mb-8 max-w-lg leading-relaxed">
-                Drop a screenshot. Get your entry, stop loss, take profit, confidence score, and full AI trade breakdown in seconds. For stocks, crypto, and forex.
+                Drop a screenshot. Get your entry, stop loss, take profit, confidence score, and full AI trade breakdown in seconds. For stocks, crypto, forex, and futures.
               </p>
               <div className="animate-fade-up delay-300 flex flex-wrap gap-3 mb-10">
                 <a href="#analyze" className="btn-yellow px-7 py-3.5 text-sm flex items-center gap-2">⚡ Start free — no card needed</a>
@@ -3103,7 +3103,7 @@ export default function App() {
                       </svg>
                     </div>
                     <p className="text-white font-semibold mb-1">Drop your chart image here</p>
-                    <p className="text-[#4b5563] text-sm">PNG, JPG — any platform, any timeframe</p>
+                    <p className="text-[#4b5563] text-sm">PNG, JPG — TradingView, MT4/5, NinjaTrader, Tradovate, Sierra Chart</p>
                   </>
                 )}
                 <input ref={fileRef} type="file" accept="image/*" className="hidden"
