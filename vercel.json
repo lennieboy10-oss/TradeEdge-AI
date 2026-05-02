@@ -3,9 +3,16 @@
   "buildCommand": "npm run build",
   "installCommand": "npm install",
   "functions": {
-    "app/api/analyze/route.ts":        { "maxDuration": 60 },
-    "app/api/chat/route.ts":           { "maxDuration": 60 },
-    "app/api/stripe/webhook/route.ts": { "maxDuration": 30 },
-    "app/api/stripe/activate/route.ts":{ "maxDuration": 30 }
-  }
+    "app/api/analyze/route.ts":          { "maxDuration": 60 },
+    "app/api/chat/route.ts":             { "maxDuration": 60 },
+    "app/api/scanner/route.ts":          { "maxDuration": 120 },
+    "app/api/scanner/trigger/route.ts":  { "maxDuration": 120 },
+    "app/api/analyze-multi/route.ts":    { "maxDuration": 120 },
+    "app/api/risk-analysis/route.ts":    { "maxDuration": 30 },
+    "app/api/stripe/webhook/route.ts":   { "maxDuration": 30 },
+    "app/api/stripe/activate/route.ts":  { "maxDuration": 30 }
+  },
+  "crons": [
+    { "path": "/api/scanner/trigger", "schedule": "0 * * * *" }
+  ]
 }

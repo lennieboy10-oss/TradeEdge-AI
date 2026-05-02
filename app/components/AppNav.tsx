@@ -30,6 +30,7 @@ const TOOLS_ITEMS = [
   { label: "Watchlist",         href: "/watchlist",                 icon: "⭐" },
   { label: "Journal",           href: "/journal",                   icon: "📓" },
   { label: "Elite Indicator",   href: "/tools/elite-indicator",     icon: "🔮" },
+  { label: "Market Scanner",    href: "/scanner",                   icon: "📡" },
 ];
 
 const COMMUNITY_ITEMS = [

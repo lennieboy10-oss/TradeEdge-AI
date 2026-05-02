@@ -15,6 +15,7 @@ import GamificationBar from "@/app/components/GamificationBar";
 import DailyChallenges from "@/app/components/DailyChallenges";
 import WelcomeQuest from "@/app/components/WelcomeQuest";
 import { useGamification } from "@/app/lib/gamification-context";
+import { detectFutures, type FuturesSpec } from "@/app/lib/futures-specs";
 
 // ── Types ──────────────────────────────────────────────────────
 type AnalysisResult = {
@@ -287,12 +288,13 @@ function NewsWarningBanner({ events, asset }: { events: CalEvent[]; asset: strin
 }
 
 // ── Position calculator ────────────────────────────────────────
-type CalcAssetType = "forex" | "crypto" | "stocks" | "gold";
+type CalcAssetType = "forex" | "crypto" | "stocks" | "gold" | "futures";
 type CalcCurrency  = "GBP" | "USD" | "EUR";
 const CURRENCY_SYMBOLS: Record<CalcCurrency, string> = { GBP: "£", USD: "$", EUR: "€" };
 
 function detectCalcAsset(asset: string): CalcAssetType {
   const up = (asset ?? "").toUpperCase().replace(/\s/g, "");
+  if (detectFutures(asset)) return "futures";
   if (up.includes("XAU") || up.includes("GOLD") || up.includes("OIL") || up.includes("WTI")) return "gold";
   const cryptoKeys = ["BTC","ETH","SOL","DOGE","ADA","XRP","AVAX","LTC","LINK","DOT","BNB","MATIC"];
   if (cryptoKeys.some((c) => up.includes(c))) return "crypto";
@@ -305,7 +307,12 @@ function parseNum(s: string): number {
   return isNaN(n) ? 0 : n;
 }
 
-type CalcResult = { sizeLabel: string; profit1: number; rr1: number; marginRequired: number; slPips?: number };
+type CalcResult = {
+  sizeLabel: string; profit1: number; rr1: number; marginRequired: number; slPips?: number;
+  contracts?: number; rawContracts?: number; dollarRiskPerContract?: number;
+  pointsAtRisk?: number; ticksAtRisk?: number; spec?: FuturesSpec;
+  microContracts?: number; microDollarRisk?: number;
+};
 
 function doCalc(
   type: CalcAssetType, riskAmt: number, entry: number, sl: number, tp: number, asset: string
@@ -314,6 +321,30 @@ function doCalc(
   const tpDist = Math.abs(tp - entry);
   if (slDist === 0 || entry === 0) return null;
   const rr1 = tpDist / slDist;
+  if (type === "futures") {
+    const spec = detectFutures(asset);
+    if (!spec) return null;
+    const pointsAtRisk = slDist;
+    const ticksAtRisk  = pointsAtRisk / spec.tickSize;
+    const dollarRiskPerContract = ticksAtRisk * spec.tickValue;
+    if (dollarRiskPerContract <= 0) return null;
+    const rawContracts = riskAmt / dollarRiskPerContract;
+    const contracts    = Math.max(1, Math.floor(rawContracts));
+    const profit1      = (tpDist / spec.tickSize) * spec.tickValue * contracts;
+    const marginRequired = contracts * spec.margin;
+    let microContracts: number | undefined;
+    let microDollarRisk: number | undefined;
+    if (spec.microSymbol) {
+      const microSpec = detectFutures(spec.microSymbol);
+      if (microSpec) {
+        const microTicks = pointsAtRisk / microSpec.tickSize;
+        const microDrpc  = microTicks * microSpec.tickValue;
+        microContracts   = Math.max(1, Math.floor(riskAmt / microDrpc));
+        microDollarRisk  = microContracts * microDrpc;
+      }
+    }
+    return { sizeLabel: `${contracts} contract${contracts !== 1 ? "s" : ""}`, profit1, rr1, marginRequired, contracts, rawContracts, dollarRiskPerContract, pointsAtRisk, ticksAtRisk, spec, microContracts, microDollarRisk };
+  }
   if (type === "forex") {
     const isJpy     = asset.toUpperCase().includes("JPY");
     const pipSize   = isJpy ? 0.01 : 0.0001;
@@ -1440,7 +1471,7 @@ function PositionCalculator({
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h3 className="font-bebas text-[22px] tracking-[0.08em] text-white">POSITION CALCULATOR</h3>
         <div className="flex gap-1.5 flex-wrap">
-          {(["forex", "crypto", "stocks", "gold"] as const).map((t) => (
+          {(["forex", "crypto", "stocks", "gold", "futures"] as const).map((t) => (
             <button key={t} onClick={() => setAssetType(t)}
               className="font-dm-mono text-[10px] uppercase px-2.5 py-1.5 rounded-lg border transition-all"
               style={assetType === t
@@ -1525,25 +1556,75 @@ function PositionCalculator({
             </div>
           </div>
 
-          <div className={`grid gap-3 ${assetType === "forex" ? "grid-cols-3" : "grid-cols-2"}`}>
-            <div className="rounded-xl p-3 text-center"
-              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Position Size</p>
-              <p className="font-dm-mono text-sm font-bold text-white">{calc.sizeLabel}</p>
+          {assetType === "futures" && calc.spec ? (
+            <div className="space-y-3">
+              {/* Contract spec badge */}
+              <div className="rounded-xl p-3 flex items-center justify-between"
+                style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
+                <div>
+                  <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#00e676] mb-0.5">Contract</p>
+                  <p className="font-dm-mono text-sm font-bold text-white">{calc.spec.name}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-0.5">{calc.spec.exchange}</p>
+                  <p className="font-dm-mono text-xs text-[#9ca3af]">Tick ${calc.spec.tickValue} / {calc.spec.tickSize}pt</p>
+                </div>
+              </div>
+              {/* Breakdown grid */}
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: "Points at Risk",   val: calc.pointsAtRisk?.toFixed(2) ?? "—" },
+                  { label: "Ticks at Risk",    val: calc.ticksAtRisk?.toFixed(0) ?? "—" },
+                  { label: "$/Contract Risk",  val: `$${calc.dollarRiskPerContract?.toFixed(2) ?? "—"}` },
+                  { label: "Contracts",        val: String(calc.contracts ?? "—") },
+                  { label: "Margin Required",  val: `${sym}${calc.marginRequired.toFixed(0)}` },
+                  { label: "$ Profit at TP",   val: `$${calc.profit1.toFixed(0)}` },
+                ].map(({ label, val }) => (
+                  <div key={label} className="rounded-xl p-3"
+                    style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">{label}</p>
+                    <p className="font-dm-mono text-sm font-bold text-white">{val}</p>
+                  </div>
+                ))}
+              </div>
+              {/* Micro alternative */}
+              {calc.microContracts !== undefined && calc.spec.microSymbol && (
+                <div className="rounded-xl p-3"
+                  style={{ background: "rgba(96,165,250,0.06)", border: "1px solid rgba(96,165,250,0.15)" }}>
+                  <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#60a5fa] mb-1">Micro Alternative ({calc.spec.microSymbol})</p>
+                  <p className="font-dm-mono text-sm font-bold text-white">{calc.microContracts} micro contract{calc.microContracts !== 1 ? "s" : ""}</p>
+                  <p className="font-dm-mono text-[10px] text-[#9ca3af] mt-0.5">~${calc.microDollarRisk?.toFixed(0)} risk</p>
+                </div>
+              )}
+              {/* Margin warning */}
+              {calc.marginRequired / balVal > 0.5 && (
+                <div className="rounded-xl p-3"
+                  style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)" }}>
+                  <p className="font-dm-mono text-[10px] text-[#fbbf24]">⚠ Margin is {((calc.marginRequired / balVal) * 100).toFixed(0)}% of account — consider reducing size</p>
+                </div>
+              )}
             </div>
-            {assetType === "forex" && calc.slPips !== undefined && (
+          ) : (
+            <div className={`grid gap-3 ${assetType === "forex" ? "grid-cols-3" : "grid-cols-2"}`}>
               <div className="rounded-xl p-3 text-center"
                 style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">SL Pips</p>
-                <p className="font-dm-mono text-sm font-bold text-white">{calc.slPips.toFixed(0)}</p>
+                <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Position Size</p>
+                <p className="font-dm-mono text-sm font-bold text-white">{calc.sizeLabel}</p>
               </div>
-            )}
-            <div className="rounded-xl p-3 text-center"
-              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Margin Est.</p>
-              <p className="font-dm-mono text-sm font-bold text-white">{sym}{calc.marginRequired.toFixed(0)}</p>
+              {assetType === "forex" && calc.slPips !== undefined && (
+                <div className="rounded-xl p-3 text-center"
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">SL Pips</p>
+                  <p className="font-dm-mono text-sm font-bold text-white">{calc.slPips.toFixed(0)}</p>
+                </div>
+              )}
+              <div className="rounded-xl p-3 text-center"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-1">Margin Est.</p>
+                <p className="font-dm-mono text-sm font-bold text-white">{sym}{calc.marginRequired.toFixed(0)}</p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <div className="flex justify-between font-dm-mono text-[10px] mb-1.5">
@@ -2580,7 +2661,7 @@ export default function App() {
   const [showWelcome, setShowWelcome]             = useState(false);
   const [showTopBanner, setShowTopBanner]         = useState(false);
   const [welcomePlan, setWelcomePlan]             = useState<"free" | "trial" | null>(null);
-  const { plan, isPro: isPlanPro } = useUserPlan();
+  const { plan, isPro: isPlanPro, isElite } = useUserPlan();
   const { user, loading: authLoading } = useAuth();
   const isPro = isPlanPro;
   const { awardXP, recordActivity, completeChallenge } = useGamification();
@@ -2597,6 +2678,18 @@ export default function App() {
   const [tvUrl, setTvUrl]                   = useState("");
   const [tvImporting, setTvImporting]       = useState(false);
   const [tvUrlError, setTvUrlError]         = useState<string | null>(null);
+
+  // ── Multi-chart state ──────────────────────────────────────
+  const mRef0 = useRef<HTMLInputElement>(null);
+  const mRef1 = useRef<HTMLInputElement>(null);
+  const mRef2 = useRef<HTMLInputElement>(null);
+  const mRef3 = useRef<HTMLInputElement>(null);
+  const mRef4 = useRef<HTMLInputElement>(null);
+  const mRef5 = useRef<HTMLInputElement>(null);
+  const [multiFiles, setMultiFiles]           = useState<(File | null)[]>([null, null, null, null, null, null]);
+  const [multiLabels, setMultiLabels]         = useState(["XAU/USD", "BTC/USD", "EUR/USD", "NAS100", "AAPL", "Chart 6"]);
+  const [multiLoading, setMultiLoading]       = useState(false);
+  const [multiResult, setMultiResult]         = useState<null | { individual: Record<string, unknown>[]; combined: Record<string, unknown> }>(null);
 
   // Init client identity + usage from localStorage
   useEffect(() => {
@@ -3792,6 +3885,211 @@ export default function App() {
               isPro={isPro}
             />
           )}
+        </div>
+      </section>
+
+      {/* ── MULTI-CHART ANALYSIS ────────────────────────────── */}
+      <section className="py-16 px-6 border-t border-white/[0.05]">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="font-bebas text-[32px] tracking-[0.06em] text-white leading-none">MULTI CHART ANALYSIS</h2>
+                <span className="px-2.5 py-1 rounded-full font-dm-mono text-[9px] font-bold tracking-widest"
+                  style={{ background: "rgba(0,230,118,0.12)", border: "1px solid rgba(0,230,118,0.3)", color: "#00e676" }}>
+                  ELITE
+                </span>
+              </div>
+              <p className="text-[#6b7280] text-sm">Upload up to 6 charts simultaneously and find confluence across markets</p>
+            </div>
+          </div>
+
+          {/* Gate / content */}
+          <div className="relative rounded-2xl overflow-hidden"
+            style={{ border: "1px solid rgba(255,255,255,0.07)", background: "#0a0c12" }}>
+
+            {!isElite && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center px-8"
+                style={{ backdropFilter: "blur(8px)", background: "rgba(8,10,16,0.8)" }}>
+                <svg width="26" height="26" viewBox="0 0 26 26" fill="none" className="mb-3">
+                  <rect x="2.5" y="11" width="21" height="13" rx="2.5" stroke="#00e676" strokeWidth="1.3"/>
+                  <path d="M8 11V8a5 5 0 0110 0v3" stroke="#00e676" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
+                <p className="font-bebas text-2xl tracking-[0.06em] text-white mb-1">ELITE FEATURE</p>
+                <p className="text-[#6b7280] text-sm mb-5">Multi-chart confluence analysis requires Elite — £39/mo</p>
+                <a href="/pricing"
+                  className="px-6 py-2.5 rounded-xl font-dm-mono text-sm font-bold transition-all hover:-translate-y-0.5"
+                  style={{ background: "#00e676", color: "#080a10" }}>
+                  Upgrade to Elite →
+                </a>
+              </div>
+            )}
+
+            <div className={`p-6 space-y-6 ${!isElite ? "pointer-events-none select-none" : ""}`}
+              style={!isElite ? { filter: "blur(5px)" } : {}}>
+
+              {/* Upload grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {([mRef0, mRef1, mRef2, mRef3, mRef4, mRef5] as React.RefObject<HTMLInputElement | null>[]).map((ref, i) => {
+                  const file = multiFiles[i];
+                  return (
+                    <div key={i}>
+                      <div className="flex gap-1.5 mb-2">
+                        <input
+                          type="text"
+                          value={multiLabels[i]}
+                          onChange={(e) => { const l = [...multiLabels]; l[i] = e.target.value; setMultiLabels(l); }}
+                          className="flex-1 px-2 py-1 rounded-lg font-dm-mono text-[10px] text-white focus:outline-none"
+                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+                        />
+                        {file && (
+                          <button onClick={() => { const f = [...multiFiles]; f[i] = null; setMultiFiles(f); }}
+                            className="w-6 h-6 rounded flex items-center justify-center text-[#6b7280] hover:text-white transition-colors"
+                            style={{ background: "rgba(255,255,255,0.06)" }}>×</button>
+                        )}
+                      </div>
+                      <div
+                        onClick={() => ref.current?.click()}
+                        className="rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-all hover:border-[#00e676]/40"
+                        style={file
+                          ? { borderColor: "rgba(0,230,118,0.35)", background: "rgba(0,230,118,0.04)" }
+                          : { borderColor: "rgba(255,255,255,0.08)" }}>
+                        {file ? (
+                          <p className="font-dm-mono text-[10px] text-[#00e676] truncate">{file.name}</p>
+                        ) : (
+                          <>
+                            <svg className="w-6 h-6 mx-auto mb-1 opacity-30" viewBox="0 0 24 24" fill="none">
+                              <path d="M12 5v10M7 9l5-4 5 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M3 19h18" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                            </svg>
+                            <p className="font-dm-mono text-[10px] text-[#4b5563]">Chart {i + 1}</p>
+                          </>
+                        )}
+                        <input ref={ref} type="file" accept="image/*" className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] ?? null;
+                            const arr = [...multiFiles]; arr[i] = f; setMultiFiles(arr);
+                          }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Analyse button */}
+              {(() => {
+                const filled = multiFiles.filter(Boolean).length;
+                return (
+                  <button
+                    disabled={filled < 2 || multiLoading}
+                    onClick={async () => {
+                      setMultiLoading(true);
+                      setMultiResult(null);
+                      try {
+                        const fd = new FormData();
+                        if (clientId) fd.append("client_id", clientId);
+                        multiFiles.forEach((f, i) => {
+                          if (f) { fd.append(`chart_${i + 1}`, f); fd.append(`label_${i + 1}`, multiLabels[i]); }
+                        });
+                        const res = await fetch("/api/analyze-multi", { method: "POST", body: fd });
+                        const data = await res.json();
+                        if (!data.error) setMultiResult(data);
+                      } catch { /* ignore */ }
+                      finally { setMultiLoading(false); }
+                    }}
+                    className="w-full py-3.5 rounded-xl font-bebas text-[18px] tracking-[0.06em] transition-all hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    style={{ background: filled >= 2 ? "#00e676" : "rgba(0,230,118,0.08)", color: filled >= 2 ? "#080a10" : "#4b5563", border: "1px solid rgba(0,230,118,0.2)" }}>
+                    {multiLoading ? (
+                      <><span className="w-4 h-4 rounded-full border-2 border-[#080a10]/30 border-t-[#080a10] animate-spin" />ANALYSING {filled} CHARTS…</>
+                    ) : `ANALYSE ALL CHARTS ${filled >= 2 ? `(${filled})` : "— UPLOAD 2+"}`}
+                  </button>
+                );
+              })()}
+
+              {/* Results */}
+              {multiResult && (() => {
+                const c = multiResult.combined as { overallBias: string; confluenceScore: number; strongestSetup: string; correlations: string[]; conflicts: string[]; summary: string };
+                const biasColor = c.overallBias === "BULLISH" ? "#00e676" : c.overallBias === "BEARISH" ? "#f87171" : "#fbbf24";
+                return (
+                  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                    {/* Overall bias + confluence */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="rounded-2xl p-5 text-center"
+                        style={{ background: `${biasColor}0d`, border: `1px solid ${biasColor}30` }}>
+                        <p className="font-dm-mono text-[9px] uppercase tracking-widest mb-2" style={{ color: biasColor }}>Overall Bias</p>
+                        <p className="font-bebas text-[36px] leading-none" style={{ color: biasColor }}>{c.overallBias}</p>
+                      </div>
+                      <div className="rounded-2xl p-5"
+                        style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
+                        <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-2">Confluence Score</p>
+                        <p className="font-bebas text-[36px] text-[#00e676] leading-none">{c.confluenceScore}%</p>
+                        <div className="h-1.5 rounded-full overflow-hidden bg-white/[0.06] mt-2">
+                          <div className="h-full rounded-full bg-[#00e676]" style={{ width: `${c.confluenceScore}%` }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Strongest setup */}
+                    {c.strongestSetup && (
+                      <div className="rounded-xl p-3 flex items-center gap-3"
+                        style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2l1.5 3.5L13 6l-2.5 2.5.5 3.5L8 10.5 5 12l.5-3.5L3 6l3.5-.5L8 2z" fill="#00e676"/></svg>
+                        <div>
+                          <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280]">Strongest Setup</p>
+                          <p className="font-dm-mono text-sm font-bold text-[#00e676]">{c.strongestSetup}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Correlations and conflicts */}
+                    <div className="grid md:grid-cols-2 gap-4">
+                      {c.correlations?.length > 0 && (
+                        <div className="rounded-xl p-4"
+                          style={{ background: "rgba(0,230,118,0.04)", border: "1px solid rgba(0,230,118,0.12)" }}>
+                          <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#4ade80] mb-2">Correlations</p>
+                          {c.correlations.map((r, i) => <p key={i} className="text-sm text-[#d1d5db] leading-relaxed">· {r}</p>)}
+                        </div>
+                      )}
+                      {c.conflicts?.length > 0 && (
+                        <div className="rounded-xl p-4"
+                          style={{ background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.12)" }}>
+                          <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#f87171] mb-2">Conflicts</p>
+                          {c.conflicts.map((r, i) => <p key={i} className="text-sm text-[#d1d5db] leading-relaxed">· {r}</p>)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Summary */}
+                    <div className="rounded-xl p-4"
+                      style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#6b7280] mb-2">Combined Summary</p>
+                      <p className="text-[#d1d5db] text-sm leading-relaxed">{c.summary}</p>
+                    </div>
+
+                    {/* Individual results grid */}
+                    <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {multiResult.individual.map((a, i) => {
+                        const bias = String(a.bias ?? "NEUTRAL");
+                        const bc = bias === "BULLISH" ? "#00e676" : bias === "BEARISH" ? "#f87171" : "#9ca3af";
+                        return (
+                          <div key={i} className="rounded-xl p-3"
+                            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                            <p className="font-bebas text-[18px] text-white">{String(a.asset ?? a.label)}</p>
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <span className="px-1.5 py-0.5 rounded font-dm-mono text-[8px] font-bold"
+                                style={{ background: `${bc}20`, color: bc }}>{bias}</span>
+                              <span className="font-dm-mono text-[9px] text-[#6b7280]">{Number(a.confidence)}%</span>
+                            </div>
+                            <p className="font-dm-mono text-[9px] text-[#6b7280] leading-snug">{String(a.summary ?? "")}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                );
+              })()}
+            </div>
+          </div>
         </div>
       </section>
 
