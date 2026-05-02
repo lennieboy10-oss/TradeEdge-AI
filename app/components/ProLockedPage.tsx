@@ -17,7 +17,7 @@ export function ProLockedPage({ icon, heading, subtext, features, ctaLabel, clie
     fetch("/api/stripe/checkout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId }),
+      body: JSON.stringify({ clientId, plan: "pro" }),
     })
       .then((r) => r.json())
       .then((d) => { if (d.url) window.location.href = d.url; });

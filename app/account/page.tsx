@@ -429,7 +429,7 @@ export default function Account() {
       const res  = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, annual }),
+        body: JSON.stringify({ clientId, plan: "pro", annual }),
       });
       const data = await res.json();
       if (data.url) window.location.href = data.url;

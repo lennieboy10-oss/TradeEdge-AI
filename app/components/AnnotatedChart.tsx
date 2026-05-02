@@ -285,7 +285,7 @@ export default function AnnotatedChart({ chartBase64, chartMime, smc, entry, sto
 
   function upgrade() {
     if (!clientId) return;
-    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) })
       .then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; });
   }
 

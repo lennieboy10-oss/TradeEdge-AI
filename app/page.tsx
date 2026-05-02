@@ -705,7 +705,7 @@ function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: stri
       const res  = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, annual }),
+        body: JSON.stringify({ clientId, plan: "pro", annual }),
       });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
@@ -1064,7 +1064,7 @@ function EntryTimerWidget({
 
   function handleUpgrade() {
     if (!clientId) return;
-    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) })
       .then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; });
   }
 
@@ -1456,7 +1456,7 @@ function PositionCalculator({
 
   function upgradeFn() {
     if (!clientId) return;
-    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) })
       .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
   }
 
@@ -1836,7 +1836,7 @@ function ChatBox({ journalId, analysisJson, chartBase64, chartMime, clientId, is
           <p className="text-white text-sm font-bold mb-1">Upgrade to Pro for unlimited chat</p>
           <p className="text-[#6b7280] text-xs mb-3">Free users get 1 AI response per analysis.</p>
           <button
-            onClick={() => clientId && fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) }).then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; })}
+            onClick={() => clientId && fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) }).then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; })}
             className="px-5 py-2 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
             style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 18px rgba(0,230,118,0.28)" }}>
             Upgrade to Pro — £19/mo
@@ -1874,7 +1874,7 @@ function ChatBox({ journalId, analysisJson, chartBase64, chartMime, clientId, is
         <p className="text-[#4b5563] text-[11px] mt-2 text-center">
           Free: 1 AI response per analysis ·{" "}
           <button
-            onClick={() => clientId && fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) }).then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; })}
+            onClick={() => clientId && fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) }).then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; })}
             className="text-[#00e676] hover:underline">
             Upgrade for unlimited
           </button>
@@ -2333,7 +2333,7 @@ function SMCSection({
 }) {
   function upgrade() {
     if (!clientId) return;
-    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+    fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) })
       .then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; });
   }
 
@@ -3708,7 +3708,7 @@ export default function App() {
                         {!isPro && (
                           <FreeWatermark onUpgrade={() => {
                             if (clientId) {
-                              fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) })
+                              fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) })
                                 .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
                             }
                           }} />
@@ -3775,7 +3775,7 @@ export default function App() {
                             <p className="text-white font-bold mb-1">Pro Feature</p>
                             <p className="text-[#6b7280] text-sm mb-4">Multi-timeframe context requires a Pro plan.</p>
                             <button
-                              onClick={() => { if (clientId) fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) }).then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; }); }}
+                              onClick={() => { if (clientId) fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) }).then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; }); }}
                               className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
                               style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 20px rgba(0,230,118,0.3)" }}>
                               Upgrade to Pro — £19/mo
@@ -4605,7 +4605,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     if (planItem.highlight && clientId) {
-                      fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, annual: showAnnualPricing }) })
+                      fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro", annual: showAnnualPricing }) })
                         .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
                     }
                   }}

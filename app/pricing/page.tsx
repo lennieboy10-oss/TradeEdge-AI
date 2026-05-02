@@ -71,12 +71,12 @@ export default function PricingPage() {
     try {
       const clientId = localStorage.getItem("ciq_client_id");
       if (!clientId) { setCheckout(null); return; }
-      // Elite uses a dedicated endpoint with no routing logic
+      // Elite → dedicated endpoint (no routing logic). Pro → main checkout with plan param.
       const endpoint = plan === "elite" ? "/api/stripe/checkout-elite" : "/api/stripe/checkout";
-      const res  = await fetch(endpoint, {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, annual, plan }),
+        body: JSON.stringify({ clientId, plan }),
       });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
