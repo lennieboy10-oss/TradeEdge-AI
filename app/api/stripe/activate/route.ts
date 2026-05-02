@@ -30,7 +30,8 @@ export async function POST(req: Request) {
     // Determine plan from the price purchased
     const lineItems  = await stripe.checkout.sessions.listLineItems(sessionId, { limit: 1 });
     const priceId    = lineItems.data[0]?.price?.id ?? "";
-    const plan       = priceId === process.env.STRIPE_ELITE_PRICE_ID ? "elite" : "pro";
+    const ELITE_PRICE_ID = process.env.STRIPE_ELITE_PRICE_ID ?? "price_1TSYQq3Xa1paguaYmYOmDlK1";
+    const plan       = priceId === ELITE_PRICE_ID ? "elite" : "pro";
 
     const { data, error } = await getSupabase()
       .from("profiles")

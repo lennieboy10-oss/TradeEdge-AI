@@ -8,13 +8,18 @@ export async function POST(req: Request) {
   try {
     const { clientId, email, annual, elite, plan } = await req.json();
 
+    // Price IDs — env vars preferred, hardcoded as fallback so production never routes wrong
+    const ELITE_PRICE   = process.env.STRIPE_ELITE_PRICE_ID   ?? "price_1TSYQq3Xa1paguaYmYOmDlK1";
+    const PRO_PRICE     = process.env.STRIPE_PRO_MONTHLY_PRICE_ID ?? process.env.STRIPE_PRICE_ID!;
+    const PRO_ANN_PRICE = process.env.STRIPE_PRO_ANNUAL_PRICE_ID  ?? process.env.STRIPE_PRICE_ID!;
+
     let priceId: string;
     if (elite || plan === "elite") {
-      priceId = process.env.STRIPE_ELITE_PRICE_ID ?? process.env.STRIPE_PRICE_ID!;
+      priceId = ELITE_PRICE;
     } else if (annual) {
-      priceId = process.env.STRIPE_PRO_ANNUAL_PRICE_ID ?? process.env.STRIPE_PRICE_ID!;
+      priceId = PRO_ANN_PRICE;
     } else {
-      priceId = process.env.STRIPE_PRO_MONTHLY_PRICE_ID ?? process.env.STRIPE_PRICE_ID!;
+      priceId = PRO_PRICE;
     }
 
     const session = await stripe.checkout.sessions.create({
