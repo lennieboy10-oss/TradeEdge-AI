@@ -22,6 +22,8 @@ export async function POST(req: Request) {
       priceId = PRO_PRICE;
     }
 
+    console.log(`[stripe/checkout] plan="${plan}" elite=${elite} → priceId=${priceId}`);
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "subscription",
