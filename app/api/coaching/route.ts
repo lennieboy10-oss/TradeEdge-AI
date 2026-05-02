@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       .single();
 
     const trialValid = profile?.plan === "trial" && profile?.trial_ends_at && new Date(profile.trial_ends_at) > new Date();
-    const isPro = profile?.plan === "pro" || trialValid;
+    const isPro = profile?.plan === "pro" || profile?.plan === "elite" || trialValid;
 
     if (!isPro) {
       return NextResponse.json({ error: "Pro plan required" }, { status: 403 });

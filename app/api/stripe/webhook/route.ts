@@ -39,32 +39,34 @@ export async function POST(req: Request) {
 
         console.log("[stripe/webhook] invoice.paid — customer:", customerId, "email:", email);
 
-        // Retrieve subscription metadata to get the browser client_id
+        // Retrieve subscription to get client_id metadata + price for plan detection
         let clientId: string | null = null;
+        let plan = "pro";
         if (subscriptionId) {
           try {
             const sub = await stripe.subscriptions.retrieve(subscriptionId);
             clientId  = sub.metadata?.client_id ?? null;
+            const priceId = sub.items.data[0]?.price?.id;
+            if (priceId && priceId === process.env.STRIPE_ELITE_PRICE_ID) plan = "elite";
           } catch (e) {
             console.error("[stripe/webhook] failed to retrieve subscription:", e);
           }
         }
 
-        console.log("[stripe/webhook] Updating user plan to pro for client_id:", clientId, "email:", email);
+        console.log(`[stripe/webhook] Updating user plan to ${plan} for client_id:`, clientId, "email:", email);
 
         if (clientId) {
           const { data, error } = await supabase.from("profiles").upsert(
-            { client_id: clientId, email, plan: "pro", stripe_customer_id: customerId },
+            { client_id: clientId, email, plan, stripe_customer_id: customerId },
             { onConflict: "client_id" }
           ).select("id, client_id, plan");
-          console.log("Plan upgraded to pro for:", email, "result:", data, error);
+          console.log(`Plan upgraded to ${plan} for:`, email, "result:", data, error);
         } else if (email) {
-          // Fallback: match by email (no client_id in metadata — old subscription)
           const { data, error } = await supabase.from("profiles")
-            .update({ plan: "pro", stripe_customer_id: customerId ?? undefined })
+            .update({ plan, stripe_customer_id: customerId ?? undefined })
             .eq("email", email)
             .select("id, client_id, plan");
-          console.log("Plan upgraded to pro for:", email, "result:", data, error);
+          console.log(`Plan upgraded to ${plan} for:`, email, "result:", data, error);
         } else {
           console.warn("[stripe/webhook] Cannot identify user — no client_id or email on invoice");
         }
@@ -79,11 +81,18 @@ export async function POST(req: Request) {
         const customerId = typeof session.customer === "string" ? session.customer : null;
         console.log("[stripe/webhook] checkout.session.completed — client_id:", clientId);
         if (clientId) {
+          // Detect plan from purchased price
+          let plan = "pro";
+          try {
+            const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
+            const priceId   = lineItems.data[0]?.price?.id;
+            if (priceId && priceId === process.env.STRIPE_ELITE_PRICE_ID) plan = "elite";
+          } catch { /* non-fatal — default to pro */ }
           const { data, error } = await supabase.from("profiles").upsert(
-            { client_id: clientId, email, plan: "pro", stripe_customer_id: customerId },
+            { client_id: clientId, email, plan, stripe_customer_id: customerId },
             { onConflict: "client_id" }
           ).select("id, client_id, plan");
-          console.log("Plan upgraded to pro for:", email, "result:", data, error);
+          console.log(`Plan upgraded to ${plan} for:`, email, "result:", data, error);
         }
         break;
       }

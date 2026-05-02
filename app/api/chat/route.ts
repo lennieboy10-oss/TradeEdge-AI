@@ -25,7 +25,7 @@ export async function POST(req: Request) {
         .select("plan")
         .eq("client_id", clientId)
         .single();
-      isPro = data?.plan === "pro";
+      isPro = data?.plan === "pro" || data?.plan === "elite";
     } catch { /* non-fatal */ }
   }
 

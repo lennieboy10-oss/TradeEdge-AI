@@ -20,7 +20,7 @@ export async function GET(req: Request) {
         .select("plan")
         .eq("client_id", clientId)
         .single();
-      isPro = data?.plan === "pro";
+      isPro = data?.plan === "pro" || data?.plan === "elite";
     }
 
     let query = supabase

@@ -211,11 +211,15 @@ export default function AppNav() {
 
                 {/* Level badge */}
                 <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
-                  style={{ background: "rgba(0,230,118,0.08)", border: "1px solid rgba(0,230,118,0.2)" }}>
-                  <span className="font-dm-mono text-[10px] font-bold text-[#00e676]">LVL {myInfo.level}</span>
+                  style={isElite
+                    ? { background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.25)" }
+                    : { background: "rgba(0,230,118,0.08)", border: "1px solid rgba(0,230,118,0.2)" }}>
+                  <span className="font-dm-mono text-[10px] font-bold" style={{ color: isElite ? "#fbbf24" : "#00e676" }}>LVL {myInfo.level}</span>
                   {planTag && (
                     <span className="font-dm-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-                      style={{ background: "rgba(0,230,118,0.15)", color: "#00e676" }}>
+                      style={isElite
+                        ? { background: "rgba(251,191,36,0.2)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.35)" }
+                        : { background: "rgba(0,230,118,0.15)", color: "#00e676" }}>
                       {planTag}
                     </span>
                   )}
@@ -352,7 +356,9 @@ export default function AppNav() {
                   </div>
                   {planTag && (
                     <span className="font-dm-mono text-[10px] font-bold px-2.5 py-1.5 rounded-lg ml-auto"
-                      style={{ background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>
+                      style={isElite
+                        ? { background: "rgba(251,191,36,0.12)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)" }
+                        : { background: "rgba(0,230,118,0.1)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>
                       {planTag}
                     </span>
                   )}

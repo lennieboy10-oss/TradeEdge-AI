@@ -55,7 +55,7 @@ export async function POST(request: Request) {
 
         if (data) {
           const trialValid = data.plan === "trial" && data.trial_ends_at && new Date(data.trial_ends_at) > new Date();
-          isPro = data.plan === "pro" || trialValid;
+          isPro = data.plan === "pro" || data.plan === "elite" || trialValid;
           freeAnalysesUsed = data.free_analyses_used ?? 0;
 
           // ── Backfill for pre-existing users (runs once per user) ──
