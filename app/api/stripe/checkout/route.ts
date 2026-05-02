@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/?cancelled=true`,
     });
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: session.url, _debug: { plan, priceId } });
   } catch (err) {
     console.error("[stripe/checkout]", err);
     return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 });
