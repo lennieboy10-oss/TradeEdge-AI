@@ -442,11 +442,23 @@ function AccessSection({ clientId, userEmail }: { clientId: string; userEmail: s
             ))}
           </div>
 
-          <a href="https://tradingview.com" target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
-            style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 22px rgba(0,230,118,0.3)" }}>
-            Open TradingView now →
-          </a>
+          <div className="flex flex-wrap gap-3">
+            <a href="https://tradingview.com" target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
+              style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 22px rgba(0,230,118,0.3)" }}>
+              Open TradingView now →
+            </a>
+            <a href="/indicators/chartiq-indicator.pine" download
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all hover:-translate-y-0.5"
+              style={{ background: "rgba(0,230,118,0.08)", color: "#00e676", border: "1px solid rgba(0,230,118,0.2)" }}>
+              ↓ Indicator .pine
+            </a>
+            <a href="/indicators/chartiq-strategy.pine" download
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all hover:-translate-y-0.5"
+              style={{ background: "rgba(96,165,250,0.08)", color: "#60a5fa", border: "1px solid rgba(96,165,250,0.2)" }}>
+              ↓ Strategy .pine
+            </a>
+          </div>
         </div>
       )}
 
