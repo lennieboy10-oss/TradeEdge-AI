@@ -26,7 +26,6 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
 
-    // Frontend sends the file as "file", not "image"
     const file = (formData.get("file") ?? formData.get("image")) as File | null;
     const asset     = (formData.get("asset")     as string | null)?.trim() || null;
     const clientId  = (formData.get("client_id") as string | null)?.trim() || null;
@@ -58,7 +57,6 @@ export async function POST(request: Request) {
           isPro = data.plan === "pro" || data.plan === "elite" || trialValid;
           freeAnalysesUsed = data.free_analyses_used ?? 0;
 
-          // ── Backfill for pre-existing users (runs once per user) ──
           if (!isPro && freeAnalysesUsed === 0) {
             const { count } = await supabase
               .from("journal")
@@ -76,7 +74,6 @@ export async function POST(request: Request) {
       } catch { /* non-fatal */ }
     }
 
-    // ── Lifetime free limit ────────────────────────────────────
     if (!isPro && freeAnalysesUsed >= FREE_LIMIT) {
       return NextResponse.json(
         { success: false, error: "Free analysis limit reached", used: freeAnalysesUsed, limit: FREE_LIMIT },
@@ -84,50 +81,73 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── Prepare image ──────────────────────────────────────────
     const bytes     = await file.arrayBuffer();
     const base64    = Buffer.from(bytes).toString("base64");
     const mediaType = (file.type || "image/jpeg") as "image/jpeg" | "image/png" | "image/webp" | "image/gif";
 
     console.log("Calling Claude API... model:claude-opus-4-5 tf:", timeframe);
 
-    // ── Single Claude call ────────────────────────────────────
     const response = await anthropic.messages.create({
       model:      "claude-opus-4-5",
-      max_tokens: 2000,
-      system: `You are a professional trader specialising in price action and smart money concepts (SMC). You are also an expert in futures markets including equity index futures (ES, NQ, MES, MNQ, YM, RTY), metal futures (GC, MGC, SI), energy futures (CL, MCL, NG), bond futures (ZB, ZN, ZF), agricultural futures (ZC, ZW, ZS), and currency futures (6E, 6B, 6J). Analyse charts carefully and precisely.
+      max_tokens: 2500,
+      system: `You are a senior institutional trading analyst with 20 years experience at a top hedge fund. You specialise in Smart Money Concepts, price action, and risk management. You also have deep expertise in futures markets including equity index futures (ES, NQ, MES, MNQ, YM, RTY), metal futures (GC, MGC, SI), energy futures (CL, MCL, NG), bond futures (ZB, ZN, ZF), and currency futures (6E, 6B, 6J).
 
-Rules:
-- Only signal LONG or SHORT if there is genuine confluence of at least 2-3 factors
-- If chart is choppy, unclear or R:R is below 1:1.5 signal NEUTRAL
-- Place stop loss beyond nearest structural level
-- Place take profit at next significant level
-- Be specific with exact price levels visible on chart
+Your analysis must be:
+- Brutally specific — exact price levels only, never ranges wider than 5 pips/points for entry
+- Professionally written — like a Bloomberg terminal report
+- Honest — if the setup is weak, say so clearly and return NEUTRAL
+- Actionable — the trader knows exactly what to do
 
-Grade the setup:
-A+ = perfect setup 85+ confidence
-A = strong setup 70-84 confidence
-B = decent setup 55-69 confidence
-C = weak setup 40-54 confidence
-D = avoid below 40 confidence
+ANALYSIS METHODOLOGY:
 
-When analysing futures charts:
-- Express key levels in both price AND points where relevant (e.g. "SL at 19,760 — 58 points below entry")
-- Consider the specific session for that futures contract (equity futures: NY Open 09:30 EST, metals: London/COMEX 08:20 EST, oil: NYMEX 09:00 EST, bonds: CBOT 08:20 EST)
-- Note if price is near a contract high/low as these are key liquidity targets
-- Micro contracts (MNQ, MES, MGC, MCL) are 1/10th the size — adjust position sizing guidance accordingly
-- Prop firm traders often have max daily loss rules — factor this in when suggesting position sizes
+1. MARKET STRUCTURE FIRST:
+Identify exact swing highs and lows. State clearly whether structure is bullish (higher highs, higher lows), bearish (lower highs, lower lows), or ranging (between two clear levels). If ranging, return NEUTRAL — avoid directional trades.
 
-SMC ANALYSIS — only report what you can clearly see:
-- FVGs: 3-candle imbalances where middle candle moves strongly leaving a gap. Return exact price range e.g. "3285-3291". Mark if filled.
-- Order Blocks: last bearish candle before strong bullish move (bullish OB) or last bullish candle before strong bearish move (bearish OB). Return price range.
-- Liquidity Sweeps: price briefly breaks a key high/low then immediately reverses (stop hunt). Return the price and whether it swept highs or lows.
-- BOS: confirmed break of previous swing high (bullish) or low (bearish). Return price.
-- CHoCH: first sign of trend reversal, not yet confirmed. Return price.
-- Equal Highs/Lows: 2+ highs or lows at same level (liquidity pool). Return price.
-- Market Zone: premium (top 25% of range, prefer shorts), discount (bottom 25%, prefer longs), or neutral.
-- Traditional Patterns: H&S, double top/bottom, bull/bear flag, wedge, triangle — only if clearly visible. Include measured move target price.
-- Fibonacci: if clear swing is visible, key retracement levels (0.382, 0.5, 0.618, 0.786) with prices.`,
+2. SMART MONEY CONCEPTS:
+- Fair Value Gaps: 3-candle imbalances. Return exact price range e.g. "3285-3291". Mark if filled.
+- Order Blocks: last candle before institutional move. Return exact candle range and type.
+- Liquidity Sweeps: price briefly breaks a key high/low then reverses (stop hunt). Return price and direction.
+- Equal Highs/Lows: 2+ highs or lows at same level — liquidity pool target.
+- BOS/CHoCH: confirmed break of structure (BOS) or first reversal sign (CHoCH). Return exact price.
+- Market Zone: premium (top 25% of range — prefer shorts), discount (bottom 25% — prefer longs), neutral.
+
+3. ENTRY PRECISION:
+Entry must be within 5 pips/points. Give exact price and exact reason (retracement level + FVG alignment, etc.). State the confirmation required: e.g. "Wait for bearish engulfing close on 5m at this level".
+
+4. STOP LOSS — STRUCTURE BASED ONLY:
+Place stop beyond the nearest structural level — never arbitrary ATR stops. State exactly what invalidates the setup.
+
+5. TAKE PROFIT — TWO LEVELS:
+TP1: first structural target (take 50% here)
+TP2: second structural target / liquidity pool (let remainder run)
+
+6. RISK:REWARD — CALCULATE BOTH:
+Calculate precisely for both TP levels. If R:R1 is below 1:1.5, return NEUTRAL.
+
+7. PROBABILITY ASSESSMENT:
+Estimate probability of reaching each TP based on confluence quality. Be conservative.
+
+8. CONFLUENCE BREAKDOWN — SCORE EACH FACTOR /20:
+- Trend alignment (is entry direction aligned with structure?)
+- SMC confluence (FVGs, OBs, sweeps aligning?)
+- Key level quality (how clean and significant is the level?)
+- Volume confirmation (is there volume evidence?)
+- Session timing (are we in optimal session for this asset?)
+
+9. CONFIRMATION AND INVALIDATION:
+State the exact trigger to wait for before entering. State the exact price level that invalidates the thesis.
+
+10. ALTERNATIVE SCENARIO:
+If the primary thesis fails, what is the plan? Where does bias flip? What is the next trade?
+
+STRICT RULES:
+- Never say "seems", "appears", "might", "could" — be definitive
+- If R:R below 1:1.5 → return NEUTRAL and explain
+- If structure is unclear → return NEUTRAL
+- If price is in the middle of a range → return NEUTRAL
+- NEUTRAL is always better than a forced signal
+- For futures: express levels in both price and points where relevant`,
+
       messages: [{
         role:    "user",
         content: [
@@ -137,8 +157,52 @@ SMC ANALYSIS — only report what you can clearly see:
           },
           {
             type: "text",
-            text: `Timeframe: ${timeframe}. Asset: ${asset ?? "unknown"}.${htfBias !== "UNKNOWN" ? ` The trader has confirmed the higher timeframe trend is ${htfBias}. Only suggest trades that align with this bias. If the chart signal goes against the higher timeframe bias, reduce confidence by 20 points and add a warning: "Trading against higher timeframe trend".` : ""} Return ONLY raw JSON no markdown no backticks:
-{"signal":"LONG or SHORT or NEUTRAL","entry":"price","stopLoss":"price","takeProfit":"price","riskReward":"1:2","confidence":75,"grade":"A","trend":"Bullish or Bearish or Ranging","keyLevels":"support and resistance","structure":"market structure","confluenceFactors":["factor 1","factor 2","factor 3"],"warnings":["warning if any"],"summary":"5 sentences: what chart shows. Why entry is valid or not. Exact invalidation level. Confirmation to wait for. Key risk.","entrySession":"best session name e.g. NY Open or London Open or Asian Session or London/NY Overlap","entryTimeUTC":"HH:MM in 24hr UTC e.g. 13:30","entryRationale":"1 sentence: why this session is optimal for this specific asset and setup","waitForConfirmation":"what to wait for before entering e.g. Wait for 15m candle close above 3295","fvg":[{"type":"bullish or bearish","priceRange":"e.g. 3285-3291","filled":false,"description":"one sentence"}],"liquiditySweeps":[{"direction":"high or low","price":"3312","description":"one sentence"}],"orderBlocks":[{"type":"bullish or bearish","priceRange":"3300-3306","description":"one sentence"}],"structureBreaks":[{"type":"BOS bullish or BOS bearish or CHoCH","price":"3290","description":"one sentence"}],"equalLevels":[{"type":"equal highs or equal lows","price":"3308","description":"one sentence"}],"marketZone":"premium or discount or neutral","patterns":[{"name":"pattern name","direction":"bullish or bearish","target":"measured move price","description":"one sentence"}],"smcFibonacci":[{"level":"0.618","price":"3285","description":"one sentence"}],"smc_summary":"one sentence overall SMC bias"}`,
+            text: `Timeframe: ${timeframe}. Asset: ${asset ?? "unknown"}.${htfBias !== "UNKNOWN" ? ` Higher timeframe bias confirmed as ${htfBias}. Only signal trades aligned with this bias. If chart signal contradicts HTF bias, reduce confidence by 20 and add warning "Trading against higher timeframe trend".` : ""}
+
+Return ONLY raw JSON, no markdown, no backticks:
+{
+  "signal": "LONG or SHORT or NEUTRAL",
+  "entry": "exact price as string",
+  "stopLoss": "exact price as string",
+  "takeProfit1": "first TP price as string",
+  "takeProfit2": "second TP price as string",
+  "riskReward1": "e.g. 1:1.65",
+  "riskReward2": "e.g. 1:3.65",
+  "confidence": 75,
+  "grade": "A+ or A or B or C or D",
+  "trend": "Bullish or Bearish or Ranging",
+  "structure": "exact description e.g. Lower highs at 3312, lower lows at 3256 — bearish structure confirmed",
+  "keyLevels": "comma separated key price levels",
+  "fvg": [{"type":"bullish or bearish","priceRange":"3285-3291","filled":false,"description":"one sentence"}],
+  "orderBlocks": [{"type":"bullish or bearish","priceRange":"3300-3306","description":"one sentence"}],
+  "liquiditySweep": "description or null",
+  "bos": "description or null",
+  "confluenceBreakdown": {
+    "trendAlignment": 16,
+    "smcConfluence": 20,
+    "keyLevelQuality": 16,
+    "volumeConfirmation": 12,
+    "sessionTiming": 11
+  },
+  "probability": {"tp1": 65, "tp2": 45},
+  "confirmation": "exact trigger to wait for e.g. Wait for bearish engulfing close on 5m below 3292",
+  "invalidation": "exact price and what it means e.g. Close above 3302.50 invalidates SHORT — flip to LONG",
+  "alternativeScenario": "what to do if wrong e.g. If price breaks above 3302, flip bias LONG targeting 3312",
+  "warnings": ["warning 1 if any"],
+  "summary": "exactly 5 sentences: 1) What is the market doing now. 2) Why this setup exists and the SMC reasoning. 3) Exact entry trigger and confirmation needed. 4) Exact invalidation level and what it means. 5) Risk management instruction.",
+  "entrySession": "best session name e.g. NY Open or London Open",
+  "entryTimeUTC": "HH:MM in 24hr UTC",
+  "entryRationale": "1 sentence why this session is optimal",
+  "waitForConfirmation": "what to wait for",
+  "liquiditySweeps": [{"direction":"high or low","price":"3312","description":"one sentence"}],
+  "structureBreaks": [{"type":"BOS bullish or BOS bearish or CHoCH","price":"3290","description":"one sentence"}],
+  "equalLevels": [{"type":"equal highs or equal lows","price":"3308","description":"one sentence"}],
+  "marketZone": "premium or discount or neutral",
+  "patterns": [{"name":"pattern name","direction":"bullish or bearish","target":"measured move price","description":"one sentence"}],
+  "smcFibonacci": [{"level":"0.618","price":"3285","description":"one sentence"}],
+  "smc_summary": "one sentence overall SMC bias",
+  "confluenceFactors": ["factor 1", "factor 2", "factor 3"]
+}`,
           },
         ],
       }],
@@ -171,7 +235,6 @@ SMC ANALYSIS — only report what you can clearly see:
         const htfWarning = "Trading against higher timeframe trend";
         if (!Array.isArray(parsed.warnings)) parsed.warnings = [];
         if (!parsed.warnings.includes(htfWarning)) parsed.warnings.unshift(htfWarning);
-        // Re-grade after confidence reduction
         const c = parsed.confidence;
         parsed.grade = c >= 85 ? "A+" : c >= 70 ? "A" : c >= 55 ? "B" : c >= 40 ? "C" : "D";
         console.log(`HTF bias penalty applied — bias:${htfBias} signal:${sig} new confidence:${parsed.confidence}`);
@@ -201,7 +264,6 @@ SMC ANALYSIS — only report what you can clearly see:
       }
     }
 
-    // ── Map flat response → shape the frontend expects ────────
     const SIGNAL_TO_BIAS: Record<string, string> = {
       LONG: "BULLISH", SHORT: "BEARISH", NEUTRAL: "NEUTRAL",
     };
@@ -215,11 +277,14 @@ SMC ANALYSIS — only report what you can clearly see:
       tradeScore:   parsed.grade,
       marketStructure: parsed.structure ?? "",
       tradeSetup: {
-        entry:       parsed.entry      ?? "N/A",
+        entry:       parsed.entry       ?? "N/A",
         entryType:   "Limit",
-        stopLoss:    parsed.stopLoss   ?? "N/A",
-        takeProfit1: parsed.takeProfit ?? "N/A",
-        riskReward:  parsed.riskReward ?? "N/A",
+        stopLoss:    parsed.stopLoss    ?? "N/A",
+        takeProfit1: parsed.takeProfit1 ?? parsed.takeProfit ?? "N/A",
+        takeProfit2: parsed.takeProfit2 ?? null,
+        riskReward:  parsed.riskReward1 ?? parsed.riskReward ?? "N/A",
+        riskReward1: parsed.riskReward1 ?? parsed.riskReward ?? "N/A",
+        riskReward2: parsed.riskReward2 ?? null,
       },
       keyLevels: {
         resistance: parsed.keyLevels ? [parsed.keyLevels] : [],
@@ -236,7 +301,12 @@ SMC ANALYSIS — only report what you can clearly see:
       entrySession:         parsed.entrySession         ?? null,
       entryTimeUTC:         parsed.entryTimeUTC         ?? null,
       entryRationale:       parsed.entryRationale       ?? null,
-      waitForConfirmation:  parsed.waitForConfirmation  ?? null,
+      waitForConfirmation:  parsed.waitForConfirmation  ?? parsed.confirmation ?? null,
+      confirmation:         parsed.confirmation         ?? parsed.waitForConfirmation ?? null,
+      invalidation:         parsed.invalidation         ?? null,
+      alternativeScenario:  parsed.alternativeScenario  ?? null,
+      confluenceBreakdown:  parsed.confluenceBreakdown  ?? null,
+      probability:          parsed.probability          ?? null,
       // SMC fields
       fvg:             Array.isArray(parsed.fvg)             ? parsed.fvg             : [],
       liquiditySweeps: Array.isArray(parsed.liquiditySweeps) ? parsed.liquiditySweeps : [],
@@ -249,12 +319,11 @@ SMC ANALYSIS — only report what you can clearly see:
       smc_summary:     parsed.smc_summary   ?? null,
     };
 
-    // Neutral placeholder for higher/highest (not analysed in this call)
     const [higherTF, highestTF] = getHigherTFs(timeframe);
     const ctxPlaceholder = (tf: string) => ({
       bias: "NEUTRAL", confidence: 0, timeframe: tf,
       summary: "Higher timeframe context not analysed in this call.",
-      tradeSetup: { entry: "N/A", entryType: "Limit", stopLoss: "N/A", takeProfit1: "N/A", riskReward: "N/A" },
+      tradeSetup: { entry: "N/A", entryType: "Limit", stopLoss: "N/A", takeProfit1: "N/A", takeProfit2: null, riskReward: "N/A", riskReward1: "N/A", riskReward2: null },
       keyLevels: { resistance: [], support: [] },
       indicators: { rsi: "Neutral", macd: "N/A", maCross: "No Cross" },
       confluences: [], confluenceChecks: [], warnings: [],
@@ -262,7 +331,6 @@ SMC ANALYSIS — only report what you can clearly see:
 
     const confluence = { score: 1, total: 3, label: "Single timeframe", color: "#f59e0b", detail: `${timeframe} only` };
 
-    // ── Increment lifetime usage ───────────────────────────────
     if (!isPro && clientId) {
       try {
         await supabase.from("profiles")
@@ -272,7 +340,6 @@ SMC ANALYSIS — only report what you can clearly see:
       } catch (e) { console.error("Usage increment error:", e); }
     }
 
-    // ── Journal save (non-fatal) ───────────────────────────────
     let journalId: string | null = null;
     try {
       const signal = bias === "BULLISH" ? "LONG" : bias === "BEARISH" ? "SHORT" : "NEUTRAL";
@@ -296,7 +363,6 @@ SMC ANALYSIS — only report what you can clearly see:
       else { journalId = jData?.id ?? null; console.log("Journal saved:", asset, signal); }
     } catch (e) { console.error("Journal exception:", e); }
 
-    // ── Alerts (fire-and-forget) ───────────────────────────────
     checkAndSendAlerts({
       pair:       asset,
       signal:     bias === "BULLISH" ? "LONG" : bias === "BEARISH" ? "SHORT" : "NEUTRAL",
