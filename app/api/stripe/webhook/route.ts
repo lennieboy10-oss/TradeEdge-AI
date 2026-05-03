@@ -120,10 +120,20 @@ export async function POST(req: Request) {
       const sub        = event.data.object as Stripe.Subscription;
       const customerId = typeof sub.customer === "string" ? sub.customer : null;
       if (customerId) {
-        const { error } = await supabase.from("profiles")
+        const { data: profiles, error } = await supabase.from("profiles")
           .update({ plan: "free" })
-          .eq("stripe_customer_id", customerId);
+          .eq("stripe_customer_id", customerId)
+          .select("client_id");
         console.log("[stripe/webhook] downgraded to free:", error?.message);
+
+        // Revoke TradingView access for any Elite users whose subscription was cancelled
+        for (const p of profiles ?? []) {
+          if (p.client_id) {
+            await supabase.from("tradingview_access")
+              .update({ status: "revoked" })
+              .eq("user_id", p.client_id);
+          }
+        }
       }
     }
   } catch (err) {
