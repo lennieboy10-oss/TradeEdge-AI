@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     const { data: profile } = await supabase
       .from("profiles")
       .select("plan")
-      .eq(isUid ? "id" : "client_id", id)
+      .eq(isUid ? "user_id" : "client_id", id)
       .single();
 
     if (!profile || (profile.plan !== "pro" && profile.plan !== "elite")) {
@@ -62,10 +62,11 @@ export async function GET(request: Request) {
     }
 
     const supabase = getSupabase();
+    const col = userId ? "user_id" : "client_id";
     const { data } = await supabase
       .from("api_keys")
       .select("id, created_at, last_used, is_active")
-      .eq("user_id", userId ?? clientId)
+      .eq(col, (userId ?? clientId)!)
       .eq("is_active", true)
       .order("created_at", { ascending: false });
 

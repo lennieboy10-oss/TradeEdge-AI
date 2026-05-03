@@ -344,6 +344,7 @@ Return ONLY raw JSON, no markdown, no backticks:
     try {
       const signal = bias === "BULLISH" ? "LONG" : bias === "BEARISH" ? "SHORT" : "NEUTRAL";
       const payload = {
+        client_id:   clientId || null,
         asset,
         timeframe,
         signal,

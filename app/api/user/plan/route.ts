@@ -49,7 +49,7 @@ export async function GET(req: Request) {
 
   const serverPlan  = profileRes.data?.plan          ?? null;
   const trialEndsAt = profileRes.data?.trial_ends_at ?? null;
-  const isOnTrial   = serverPlan !== "pro" && !!trialEndsAt && new Date(trialEndsAt) > new Date();
+  const isOnTrial   = serverPlan !== "pro" && serverPlan !== "elite" && !!trialEndsAt && new Date(trialEndsAt) > new Date();
 
   return NextResponse.json({
     plan:               serverPlan,
