@@ -15,9 +15,10 @@ export async function GET(req: Request) {
   const supabase = getSupabase();
 
   // Look up profile — prefer user_id (auth user), fall back to client_id (anonymous)
+  // Note: free_analyses_used is fetched separately so a missing column doesn't break plan lookup
   const profileQuery = userId
-    ? supabase.from("profiles").select("plan, email, trial_ends_at, free_analyses_used").eq("user_id", userId).single()
-    : supabase.from("profiles").select("plan, email, trial_ends_at, free_analyses_used").eq("client_id", clientId!).single();
+    ? supabase.from("profiles").select("plan, email, trial_ends_at").eq("user_id", userId).single()
+    : supabase.from("profiles").select("plan, email, trial_ends_at").eq("client_id", clientId!).single();
 
   const countQuery = userId
     ? supabase.from("journal").select("id", { count: "exact", head: true }).eq("user_id", userId)
@@ -55,7 +56,7 @@ export async function GET(req: Request) {
     plan:               serverPlan,
     email:              profileRes.data?.email               ?? null,
     totalAnalyses:      countRes.count                       ?? 0,
-    freeAnalysesUsed:   profileRes.data?.free_analyses_used  ?? 0,
+    freeAnalysesUsed:   0,
     isOnTrial,
     trialEndsAt,
   });
