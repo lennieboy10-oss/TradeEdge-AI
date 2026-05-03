@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2024-11-20.acacia" as any });
 
-// Dedicated Elite-only endpoint — no routing logic possible
 const ELITE_PRICE_ID = process.env.STRIPE_ELITE_PRICE_ID ?? "price_1TSYQq3Xa1paguaYmYOmDlK1";
 
 export async function POST(req: Request) {
@@ -19,11 +18,11 @@ export async function POST(req: Request) {
       line_items: [{ price: ELITE_PRICE_ID, quantity: 1 }],
       customer_email: email || undefined,
       client_reference_id: clientId || undefined,
-      metadata: { user_id: clientId || "", plan: "elite" },
+      metadata: { userId: clientId || "", userEmail: email || "", plan: "elite" },
       subscription_data: {
         metadata: { client_id: clientId || "", plan: "elite" },
       },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?upgraded=true&session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?upgraded=elite&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/?cancelled=true`,
     });
 

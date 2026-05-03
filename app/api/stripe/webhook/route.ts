@@ -22,108 +22,112 @@ export async function POST(req: Request) {
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-  } catch (err) {
-    console.error("[stripe/webhook] signature failed:", err);
-    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Signature failed";
+    console.error("[stripe/webhook] signature failed:", msg);
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 
-  const supabase = getSupabase();
   console.log("[stripe/webhook] received:", event.type);
 
+  const supabase = getSupabase();
+
   try {
-    switch (event.type) {
+    // ── checkout.session.completed ─────────────────────────────────
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
 
-      // Primary — fires reliably on first payment and renewals
-      case "invoice.paid":
-      case "invoice.payment_succeeded": {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const invoice        = event.data.object as any;
-        const email          = (invoice.customer_email as string | null) ?? null;
-        const customerId     = typeof invoice.customer === "string" ? invoice.customer : null;
-        const subscriptionId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+      // Plan from metadata — set at checkout creation time
+      const plan      = (session.metadata?.plan as "elite" | "pro") || "pro";
+      const userId    = session.metadata?.userId || session.client_reference_id || "";
+      const userEmail = session.metadata?.userEmail || session.customer_email ||
+        (session.customer_details as { email?: string } | null)?.email || "";
+      const customerId = typeof session.customer === "string" ? session.customer : null;
 
-        let clientId: string | null = null;
-        let plan: "elite" | "pro"  = "pro";
+      console.log(`[stripe/webhook] checkout.session.completed plan=${plan} userId=${userId} email=${userEmail}`);
 
-        if (subscriptionId) {
-          try {
-            const sub = await stripe.subscriptions.retrieve(subscriptionId);
-            clientId  = sub.metadata?.client_id ?? null;
-            // Prefer plan stored in metadata, fall back to price ID comparison
-            plan = (sub.metadata?.plan === "elite") ? "elite" : planFromPriceId(sub.items.data[0]?.price?.id);
-          } catch (e) {
-            console.error("[stripe/webhook] failed to retrieve subscription:", e);
-          }
-        }
-
-        console.log(`[stripe/webhook] invoice.paid → plan=${plan} clientId=${clientId} email=${email}`);
-
-        if (clientId) {
-          const { data, error } = await supabase.from("profiles").upsert(
-            { client_id: clientId, email, plan, stripe_customer_id: customerId },
-            { onConflict: "client_id" }
-          ).select("id, client_id, plan");
-          console.log(`Upgraded to ${plan}:`, email, data, error);
-        } else if (email) {
-          const { data, error } = await supabase.from("profiles")
-            .update({ plan, stripe_customer_id: customerId ?? undefined })
-            .eq("email", email)
-            .select("id, client_id, plan");
-          console.log(`Upgraded to ${plan}:`, email, data, error);
-        } else {
-          console.warn("[stripe/webhook] no client_id or email — cannot identify user");
-        }
-        break;
+      if (!userEmail && !userId) {
+        console.error("[stripe/webhook] no user identifier — skipping");
+        return NextResponse.json({ received: true });
       }
 
-      // Belt-and-suspenders
-      case "checkout.session.completed": {
-        const session    = event.data.object as Stripe.Checkout.Session;
-        const clientId   = session.client_reference_id;
-        const email      = session.customer_email ?? session.metadata?.email ?? null;
-        const customerId = typeof session.customer === "string" ? session.customer : null;
+      // Update by email
+      if (userEmail) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ plan, stripe_customer_id: customerId })
+          .eq("email", userEmail);
+        console.log(`[stripe/webhook] update by email → plan=${plan}`, error?.message);
+      }
 
-        if (!clientId) break;
+      // Update by userId (covers both user_id and client_id columns)
+      if (userId) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ plan, stripe_customer_id: customerId })
+          .or(`user_id.eq.${userId},client_id.eq.${userId}`);
+        console.log(`[stripe/webhook] update by userId → plan=${plan}`, error?.message);
+      }
+    }
 
-        // Read plan from metadata (set during checkout creation), fall back to price ID
-        let plan: "elite" | "pro" = "pro";
-        if (session.metadata?.plan === "elite") {
-          plan = "elite";
-        } else {
-          try {
-            const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
-            plan = planFromPriceId(lineItems.data[0]?.price?.id);
-          } catch { /* non-fatal */ }
+    // ── invoice.paid / invoice.payment_succeeded ───────────────────
+    if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const invoice        = event.data.object as any;
+      const email          = (invoice.customer_email as string | null) ?? null;
+      const customerId     = typeof invoice.customer === "string" ? invoice.customer : null;
+      const subscriptionId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+
+      let clientId: string | null = null;
+      let plan: "elite" | "pro"  = "pro";
+
+      if (subscriptionId) {
+        try {
+          const sub = await stripe.subscriptions.retrieve(subscriptionId);
+          clientId  = sub.metadata?.client_id ?? null;
+          // Prefer plan from subscription metadata, fall back to price ID
+          plan = (sub.metadata?.plan === "elite")
+            ? "elite"
+            : planFromPriceId(sub.items.data[0]?.price?.id);
+        } catch (e) {
+          console.error("[stripe/webhook] failed to retrieve subscription:", e);
+          // Fall back: derive plan from invoice line item price
+          const priceId = invoice.lines?.data?.[0]?.price?.id;
+          plan = planFromPriceId(priceId);
         }
+      }
 
-        console.log(`[stripe/webhook] checkout.session.completed → plan=${plan} clientId=${clientId}`);
+      console.log(`[stripe/webhook] invoice.paid → plan=${plan} clientId=${clientId} email=${email}`);
 
-        const { data, error } = await supabase.from("profiles").upsert(
+      if (clientId) {
+        const { error } = await supabase.from("profiles").upsert(
           { client_id: clientId, email, plan, stripe_customer_id: customerId },
           { onConflict: "client_id" }
-        ).select("id, client_id, plan");
-        console.log(`Upgraded to ${plan}:`, email, data, error);
-        break;
+        );
+        console.log(`[stripe/webhook] upsert by clientId plan=${plan}`, error?.message);
+      } else if (email) {
+        const { error } = await supabase.from("profiles")
+          .update({ plan, stripe_customer_id: customerId ?? undefined })
+          .eq("email", email);
+        console.log(`[stripe/webhook] update by email plan=${plan}`, error?.message);
+      } else {
+        console.warn("[stripe/webhook] no identifier on invoice — cannot update profile");
       }
+    }
 
-      case "customer.subscription.deleted": {
-        const sub        = event.data.object as Stripe.Subscription;
-        const customerId = typeof sub.customer === "string" ? sub.customer : null;
-        if (customerId) {
-          const { data, error } = await supabase.from("profiles")
-            .update({ plan: "free" })
-            .eq("stripe_customer_id", customerId)
-            .select("id, plan");
-          console.log("[stripe/webhook] downgraded to free:", data, error);
-        }
-        break;
+    // ── customer.subscription.deleted ─────────────────────────────
+    if (event.type === "customer.subscription.deleted") {
+      const sub        = event.data.object as Stripe.Subscription;
+      const customerId = typeof sub.customer === "string" ? sub.customer : null;
+      if (customerId) {
+        const { error } = await supabase.from("profiles")
+          .update({ plan: "free" })
+          .eq("stripe_customer_id", customerId);
+        console.log("[stripe/webhook] downgraded to free:", error?.message);
       }
-
-      default:
-        console.log("[stripe/webhook] unhandled:", event.type);
     }
   } catch (err) {
-    console.error("[stripe/webhook] db update failed:", err);
+    console.error("[stripe/webhook] handler error:", err);
   }
 
   return NextResponse.json({ received: true });

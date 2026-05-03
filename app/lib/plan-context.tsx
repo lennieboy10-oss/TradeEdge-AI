@@ -12,6 +12,7 @@ interface UserPlanState {
   email:          string | null;
   totalAnalyses:  number;
   confirmPro:     () => void;
+  confirmPlan:    (plan: string) => void;
   refresh:        () => Promise<void>;
 }
 
@@ -19,6 +20,7 @@ const UserPlanCtx = createContext<UserPlanState>({
   plan: "free", isPro: false, isElite: false, isOnTrial: false, trialEndsAt: null,
   email: null, totalAnalyses: 0,
   confirmPro: () => {},
+  confirmPlan: () => {},
   refresh: async () => {},
 });
 
@@ -33,14 +35,17 @@ export function UserPlanProvider({ children }: { children: React.ReactNode }) {
   const [email, setEmail]                 = useState<string | null>(null);
   const [totalAnalyses, setTotalAnalyses] = useState(0);
 
-  const confirmPro = useCallback(() => {
-    setPlan("pro");
+  const confirmPlan = useCallback((activatedPlan: string) => {
+    const p = activatedPlan === "elite" ? "elite" : "pro";
+    setPlan(p);
     setIsOnTrial(false);
     if (typeof window === "undefined") return;
-    localStorage.setItem("ciq_plan", "pro");
+    localStorage.setItem("ciq_plan", p);
     localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
     sessionStorage.setItem("ciq_verified_pro", "true");
   }, []);
+
+  const confirmPro = useCallback(() => confirmPlan("pro"), [confirmPlan]);
 
   const fetchPlan = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -79,10 +84,10 @@ export function UserPlanProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      if (serverPlan === "pro") {
+      if (serverPlan === "elite" || serverPlan === "pro") {
         setIsOnTrial(false);
-        setPlan("pro");
-        localStorage.setItem("ciq_plan", "pro");
+        setPlan(serverPlan);
+        localStorage.setItem("ciq_plan", serverPlan);
         localStorage.setItem("ciq_plan_checked_at", Date.now().toString());
         sessionStorage.setItem("ciq_verified_pro", "true");
       } else if (serverPlan === "free" || serverPlan === "trial") {
@@ -109,13 +114,12 @@ export function UserPlanProvider({ children }: { children: React.ReactNode }) {
     setPlan(cached);
 
     if (sessionStorage.getItem("ciq_verified_pro") === "true") {
-      setPlan("pro");
-      localStorage.setItem("ciq_plan", "pro");
+      setPlan(cached === "elite" ? "elite" : "pro");
     }
 
     const checkedAt = parseInt(localStorage.getItem("ciq_plan_checked_at") || "0", 10);
-    if (cached === "pro" && Date.now() - checkedAt < 24 * 60 * 60 * 1000) {
-      setPlan("pro");
+    if ((cached === "pro" || cached === "elite") && Date.now() - checkedAt < 24 * 60 * 60 * 1000) {
+      setPlan(cached);
       sessionStorage.setItem("ciq_verified_pro", "true");
       return;
     }
@@ -147,6 +151,7 @@ export function UserPlanProvider({ children }: { children: React.ReactNode }) {
       email,
       totalAnalyses,
       confirmPro,
+      confirmPlan,
       refresh,
     }}>
       {children}
