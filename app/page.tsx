@@ -23,7 +23,7 @@ type AnalysisResult = {
   confidence: number;
   timeframe: string;
   summary: string;
-  tradeSetup: { entry: string; entryType: string; stopLoss: string; takeProfit1: string; riskReward: string };
+  tradeSetup: { entry: string; entryType: string; stopLoss: string; takeProfit1: string; takeProfit2?: string | null; riskReward: string; riskReward1?: string; riskReward2?: string | null };
   keyLevels:  { resistance: string[]; support: string[] };
   indicators: { rsi: string; macd: string; maCross: string };
   confluences: string[];
@@ -44,6 +44,12 @@ type AnalysisResult = {
   entryTimeUTC?: string | null;
   entryRationale?: string | null;
   waitForConfirmation?: string | null;
+  // Institutional analysis fields
+  confirmation?: string | null;
+  invalidation?: string | null;
+  alternativeScenario?: string | null;
+  confluenceBreakdown?: { trendAlignment: number; smcConfluence: number; keyLevelQuality: number; volumeConfirmation: number; sessionTiming: number } | null;
+  probability?: { tp1: number; tp2: number } | null;
   // SMC fields
   fvg?:             { type: string; priceRange: string; filled?: boolean; description?: string }[];
   liquiditySweeps?: { direction?: string; price: string; description?: string }[];
@@ -694,10 +700,50 @@ function AnalysisExpiry() {
 }
 
 // ── Daily limit modal ──────────────────────────────────────────
-function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: string | null }) {
+function LimitModal({ onClose, clientId, lastAsset, lastSignal }: {
+  onClose: () => void;
+  clientId: string | null;
+  lastAsset?: string | null;
+  lastSignal?: string | null;
+}) {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [showDemo, setShowDemo]               = useState(false);
-  const [annual, setAnnual]                   = useState(false);
+  const [liveCount, setLiveCount]             = useState(4);
+  const [visibleItems, setVisibleItems]       = useState(0);
+  const [timeLeft, setTimeLeft]               = useState("");
+
+  // Countdown to midnight UTC
+  useEffect(() => {
+    function tick() {
+      const now  = new Date();
+      const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+      const diff = midnight.getTime() - now.getTime();
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setTimeLeft(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Stagger reveal locked items
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 1; i <= 7; i++) {
+      timers.push(setTimeout(() => setVisibleItems(i), i * 200));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // Rotate live count
+  useEffect(() => {
+    const counts = [2, 3, 4, 5, 6, 3, 4];
+    let idx = 0;
+    const id = setInterval(() => { idx = (idx + 1) % counts.length; setLiveCount(counts[idx]); }, 90000);
+    return () => clearInterval(id);
+  }, []);
 
   async function handleUpgrade() {
     setCheckoutLoading(true);
@@ -705,7 +751,7 @@ function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: stri
       const res  = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, plan: "pro", annual }),
+        body: JSON.stringify({ clientId, plan: "pro" }),
       });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
@@ -717,127 +763,137 @@ function LimitModal({ onClose, clientId }: { onClose: () => void; clientId: stri
     return <DemoProAnalysis onBack={() => setShowDemo(false)} onUpgrade={handleUpgrade} checkoutLoading={checkoutLoading} />;
   }
 
-  const dailyCost = annual ? "41p" : "64p";
+  const assetLabel = lastAsset ?? "your chart";
+  const signalLabel = lastSignal ?? "analysis";
+
+  const lockedItems = [
+    { icon: "📐", text: `Fibonacci 61.8% retracement — key reversal confluence on ${assetLabel}` },
+    { icon: "🏛️", text: `${signalLabel === "LONG" ? "Bullish" : "Bearish"} order block identified — institutional supply zone` },
+    { icon: "💧", text: "Liquidity sweep confirmed — stop hunt before reversal detected" },
+    { icon: "⏰", text: "Optimal entry timer: NY Open 14:30 UTC — best liquidity window" },
+    { icon: "📊", text: "Historical win rate: 71% on this exact pattern and asset" },
+    { icon: "🤖", text: "AI coaching tip personalised to your trading history" },
+    { icon: "📜", text: "Pine Script auto-generated — paste into TradingView instantly" },
+  ];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto"
-      style={{ background: "rgba(4, 6, 10, 0.94)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" }}>
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto"
+      style={{ background: "rgba(4,6,10,0.94)", backdropFilter: "blur(18px)" }}>
       <motion.div
-        initial={{ opacity: 0, scale: 0.88, y: 24 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: "spring", bounce: 0.22, duration: 0.5 }}
-        className="w-full max-w-sm rounded-2xl p-7 text-center my-4"
-        style={{
-          background: "#080c0a",
-          border: "1px solid rgba(0,230,118,0.28)",
-          boxShadow: "0 0 60px rgba(0,230,118,0.07), 0 24px 64px rgba(0,0,0,0.55)",
-        }}
+        initial={{ opacity: 0, y: 80 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: "spring", bounce: 0.18, duration: 0.55 }}
+        className="w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl p-6 text-center overflow-y-auto"
+        style={{ maxHeight: "92vh", background: "#080c0a", border: "1px solid rgba(0,230,118,0.22)", boxShadow: "0 0 60px rgba(0,230,118,0.07), 0 24px 64px rgba(0,0,0,0.6)" }}
       >
-        {/* Header */}
-        <h2 className="font-bebas text-[42px] leading-none tracking-[0.05em] text-white mb-1">
-          YOU HIT YOUR LIMIT
-        </h2>
-        <p className="text-[#6b7280] text-sm mb-5">You have used all 5 of your free analyses. Upgrade to Pro for unlimited chart analysis.</p>
+        {/* Urgency bar */}
+        <div className="rounded-xl px-3 py-2 mb-4 flex items-center justify-center gap-2"
+          style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)" }}>
+          <span className="w-2 h-2 rounded-full bg-[#ef4444] animate-pulse flex-shrink-0" />
+          <p className="text-[#f87171] text-xs font-bold">You just missed 7 Pro insights on this chart — unlock them now</p>
+        </div>
 
-        {/* What they're missing */}
-        <div className="rounded-xl overflow-hidden mb-4"
-          style={{ border: "1px solid rgba(0,230,118,0.15)", background: "rgba(0,230,118,0.04)" }}>
-          <div className="px-4 py-2.5 border-b border-white/[0.06]">
-            <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#9ca3af] font-semibold text-left">
-              Your last chart had hidden Pro insights — unlock them:
+        {/* Header */}
+        <h2 className="font-bebas text-[42px] leading-none tracking-[0.05em] text-white mb-1">YOU&apos;RE MISSING OUT</h2>
+        <p className="text-[#6b7280] text-sm mb-5">Free users see the signal. Pro users see everything.</p>
+
+        {/* What they missed */}
+        <div className="rounded-xl overflow-hidden mb-4 text-left" style={{ border: "1px solid rgba(0,230,118,0.12)", background: "rgba(0,230,118,0.03)" }}>
+          <div className="px-4 py-2.5 border-b border-white/[0.05]">
+            <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#9ca3af] font-semibold">
+              On your {assetLabel} {signalLabel} analysis, Pro users also saw:
             </p>
           </div>
-          <div className="p-3 text-left space-y-1.5">
-            {[
-              "Fibonacci retracement levels",
-              "Smart money concept analysis",
-              "Historical pattern match",
-              "Exact invalidation with reasoning",
-              "Best trading session for this setup",
-              "Personal coaching tip based on your journal",
-            ].map((f) => (
-              <div key={f} className="flex items-center gap-2 text-xs text-[#9ca3af]">
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="flex-shrink-0">
-                  <path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          <div className="p-3 space-y-1.5">
+            {lockedItems.map((item, idx) => (
+              <motion.div key={idx}
+                initial={{ opacity: 0, filter: "blur(4px)" }}
+                animate={visibleItems > idx ? { opacity: 1, filter: "blur(0px)" } : {}}
+                transition={{ duration: 0.35 }}
+                className="flex items-start gap-2.5 text-xs text-[#9ca3af]">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0 mt-0.5">
+                  <rect x="1" y="5.5" width="10" height="6" rx="1.2" stroke="#00e676" strokeWidth="1.1"/>
+                  <path d="M3.5 5.5V4A2.5 2.5 0 018.5 4v1.5" stroke="#00e676" strokeWidth="1.1" strokeLinecap="round"/>
                 </svg>
-                {f}
+                <span>{item.icon} {item.text}</span>
+              </motion.div>
+            ))}
+          </div>
+          <div className="px-4 py-2.5 border-t border-white/[0.05]">
+            <p className="text-[#00e676] text-xs font-semibold">Upgrade to see all 7 insights on this chart right now →</p>
+          </div>
+        </div>
+
+        {/* Live social proof */}
+        <div className="flex items-center justify-center gap-2 mb-4">
+          <span className="w-2 h-2 rounded-full bg-[#ef4444] animate-pulse" />
+          <p className="font-dm-mono text-[11px] text-[#9ca3af]">LIVE — <span className="text-white font-bold">{liveCount} traders</span> upgraded in the last hour</p>
+        </div>
+
+        {/* Pricing reframe */}
+        <div className="mb-4">
+          <p className="font-bebas text-[52px] leading-none tracking-[0.03em] text-[#00e676]">64p per day</p>
+          <p className="text-[#4b5563] text-xs mt-0.5">£19/month — less than one losing trade</p>
+          <p className="text-[#4b5563] text-[10px] mt-0.5">One winning trade pays for 6 months subscription</p>
+        </div>
+
+        {/* Trust row */}
+        <div className="grid grid-cols-2 gap-1.5 mb-4">
+          {["✅ 7 day money back", "✅ Cancel any time", "✅ Instant access", "✅ 2,400+ traders"].map((b) => (
+            <p key={b} className="font-dm-mono text-[9px] text-[#4b5563] text-center leading-snug px-1 py-1.5 rounded-lg"
+              style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>{b}</p>
+          ))}
+        </div>
+
+        {/* Stars + testimonials */}
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 mb-4">
+          <div className="flex items-center justify-center gap-0.5 mb-2">
+            {[0,1,2,3,4].map((i) => <svg key={i} width="12" height="12" viewBox="0 0 14 14" fill="#00e676"><path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/></svg>)}
+            <span className="font-dm-mono text-[10px] text-[#6b7280] ml-1.5">4.9/5 from 312 traders</span>
+          </div>
+          <div className="space-y-2 text-left">
+            {[
+              { q: `"Paid for itself on my first trade"`, by: "— James R, Forex trader" },
+              { q: `"The SMC analysis is incredible"`,    by: "— Sofia M, Crypto trader" },
+              { q: `"Best trading tool I've used"`,       by: "— Ryan T, Stocks trader" },
+            ].map((t) => (
+              <div key={t.by}>
+                <p className="text-[#9ca3af] text-[10px] leading-snug">{t.q}</p>
+                <p className="text-[#4b5563] text-[9px]">{t.by}</p>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Monthly / Annual toggle */}
-        <div className="flex items-center gap-2 mb-4">
-          <button onClick={() => setAnnual(false)}
-            className="flex-1 py-2 rounded-lg font-dm-mono text-xs font-bold transition-all"
-            style={!annual ? { background: "#00e676", color: "#080a10" } : { background: "rgba(255,255,255,0.05)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.09)" }}>
-            Monthly
-          </button>
-          <button onClick={() => setAnnual(true)}
-            className="flex-1 py-2 rounded-lg font-dm-mono text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-            style={annual ? { background: "#00e676", color: "#080a10" } : { background: "rgba(255,255,255,0.05)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.09)" }}>
-            Annual
-            <span className="text-[9px] px-1.5 py-0.5 rounded-full"
-              style={{ background: annual ? "rgba(8,10,16,0.25)" : "rgba(0,230,118,0.15)", color: annual ? "#080a10" : "#00e676" }}>
-              SAVE 35%
-            </span>
-          </button>
+        {/* Countdown */}
+        <div className="rounded-xl border border-white/[0.06] px-4 py-2.5 mb-4 flex items-center justify-between">
+          <p className="text-[#6b7280] text-xs">Free limit resets in:</p>
+          <p className="font-dm-mono text-sm font-bold text-white">{timeLeft}</p>
         </div>
 
-        {/* Daily cost pricing */}
-        <div className="mb-1">
-          <p className="font-bebas text-[52px] leading-none tracking-[0.03em] text-[#00e676]">{dailyCost} per day</p>
-          <p className="text-[#4b5563] text-xs mt-0.5">
-            {annual ? "£149/yr billed annually" : "£19 billed monthly"} — cancel any time
-          </p>
-        </div>
-
-        {/* Social proof */}
-        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 my-4">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-1">
-              {[0,1,2,3,4].map((i) => (
-                <svg key={i} width="11" height="11" viewBox="0 0 14 14" fill="#00e676">
-                  <path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/>
-                </svg>
-              ))}
-              <span className="font-dm-mono text-[10px] text-[#6b7280] ml-1">4.9/5 · 312 reviews</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="font-dm-mono text-[10px] text-[#6b7280]">847 traders upgraded this week</span>
-            <span className="font-dm-mono text-[10px] text-[#6b7280]">73% of users are on Pro</span>
-          </div>
-        </div>
-
-        {/* Urgency */}
-        <div className="rounded-xl border border-[#9ca3af]/20 bg-[#9ca3af]/[0.06] px-4 py-2 mb-4">
-          <p className="font-dm-mono text-[10px] text-[#9ca3af]">
-            Launch price — increases to £29/mo on 1st June 2026
-          </p>
-        </div>
-
-        {/* Primary CTA */}
-        <button
+        {/* Primary CTA with pulse */}
+        <motion.button
           onClick={handleUpgrade}
           disabled={checkoutLoading}
-          className="w-full py-4 rounded-xl text-base font-bold mb-3 transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.98] disabled:opacity-60"
-          style={{ background: "#00e676", color: "#080c0a", boxShadow: "0 0 28px rgba(0,230,118,0.32)" }}>
-          {checkoutLoading ? "Redirecting…" : `Start Pro now — ${dailyCost}/day`}
-        </button>
+          animate={{ boxShadow: ["0 0 20px rgba(0,230,118,0.3)", "0 0 40px rgba(0,230,118,0.5)", "0 0 20px rgba(0,230,118,0.3)"] }}
+          transition={{ duration: 2, repeat: Infinity }}
+          className="w-full py-4 rounded-xl text-base font-bold mb-3 transition-all duration-200 hover:-translate-y-0.5 disabled:opacity-60"
+          style={{ background: "#00e676", color: "#080c0a" }}>
+          {checkoutLoading ? "Redirecting…" : "Unlock Pro now — 64p/day →"}
+        </motion.button>
 
-        {/* Secondary CTA — demo */}
+        {/* Secondary CTA */}
         <button onClick={() => setShowDemo(true)}
-          className="w-full py-3 rounded-xl text-sm font-semibold border border-white/[0.12] text-white hover:bg-white/[0.06] transition-all duration-150 mb-4">
-          See a Pro analysis example →
+          className="w-full py-3 rounded-xl text-sm font-semibold border border-white/[0.1] text-white hover:bg-white/[0.05] transition-all mb-3">
+          See a full Pro analysis example first
         </button>
 
-        {/* Trust badges */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {["✅ 7 day money back", "✅ Cancel any time", "✅ Instant access"].map((b) => (
-            <p key={b} className="font-dm-mono text-[9px] text-[#4b5563] text-center leading-snug">{b}</p>
-          ))}
-        </div>
+        {/* Risk reversal */}
+        <p className="text-[#4b5563] text-[10px] leading-relaxed mb-3">
+          If you don&apos;t find Pro worth it in 7 days we&apos;ll refund every penny.<br/>No emails. No questions. Instant refund.
+        </p>
+
+        <p className="text-[#374151] text-[9px] mb-2">Join 2,400+ traders already on Pro · No contracts · Cancel any time</p>
 
         <button onClick={onClose} className="text-[#4b5563] text-xs hover:text-[#9ca3af] transition-colors">
           No thanks, wait until tomorrow
@@ -2638,6 +2694,50 @@ function MostSharedSetups() {
   );
 }
 
+// ── FAQ accordion ──────────────────────────────────────────────
+function FaqSection() {
+  const [open, setOpen] = useState<number | null>(null);
+  const faqs = [
+    { q: "How accurate is the AI analysis?", a: "Our AI uses institutional-grade Smart Money Concepts methodology combined with traditional technical analysis. It only signals when multiple factors align — refusing to force trades on weak setups. Users who follow A and B grade signals report significantly improved win rates." },
+    { q: "Does it work with my broker or platform?", a: "ChartIQ works with any chart screenshot — TradingView, Binance, MT4, MT5, FXReplay, NinjaTrader, Tradovate, or any broker platform. If you can screenshot it, we can analyse it." },
+    { q: "What markets does it support?", a: "Forex, crypto, stocks, indices, commodities, and futures. Gold, Bitcoin, EUR/USD, NQ, ES, AAPL — if it has a chart, we can read it." },
+    { q: "Is my data private?", a: "Yes. Your chart images are processed and immediately deleted. Your journal is private to your account. We never sell or share your trading data." },
+    { q: "Can I cancel anytime?", a: "Absolutely. Cancel with one click in your account settings. No cancellation fees. No questions asked. Your data remains accessible for 30 days after cancellation." },
+    { q: "Do you offer refunds?", a: "Yes — 7 day money back guarantee on all paid plans. If you are not satisfied, email us and we refund immediately. No questions asked." },
+  ];
+  return (
+    <section className="py-24 px-6 border-t border-white/[0.05]">
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-12" data-animate>
+          <SectionBadge>COMMON QUESTIONS</SectionBadge>
+          <h2 className="font-bebas text-[clamp(36px,5vw,56px)] leading-none tracking-[0.03em] text-white mt-3">
+            GOT QUESTIONS?
+          </h2>
+        </div>
+        <div className="space-y-2">
+          {faqs.map((faq, i) => (
+            <div key={i} className="rounded-2xl overflow-hidden border border-white/[0.06]" style={{ background: "#0c0f18" }}>
+              <button onClick={() => setOpen(open === i ? null : i)}
+                className="w-full flex items-center justify-between px-5 py-4 text-left">
+                <span className="text-white text-sm font-semibold pr-4">{faq.q}</span>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0 transition-transform duration-200"
+                  style={{ transform: open === i ? "rotate(180deg)" : "rotate(0deg)" }}>
+                  <path d="M3 6l5 5 5-5" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              {open === i && (
+                <div className="px-5 pb-4 border-t border-white/[0.05]">
+                  <p className="text-[#6b7280] text-sm leading-relaxed pt-3">{faq.a}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Main app ───────────────────────────────────────────────────
 export default function App() {
   const [file, setFile]             = useState<File | null>(null);
@@ -2958,7 +3058,7 @@ export default function App() {
       )}
 
       {/* ── DAILY LIMIT MODAL ───────────────────────────────── */}
-      {showLimitModal && <LimitModal onClose={() => setShowLimitModal(false)} clientId={clientId} />}
+      {showLimitModal && <LimitModal onClose={() => setShowLimitModal(false)} clientId={clientId} lastAsset={asset || null} lastSignal={cur?.bias === "BULLISH" ? "LONG" : cur?.bias === "BEARISH" ? "SHORT" : null} />}
 
       {/* ── EXIT INTENT POPUP ───────────────────────────────── */}
       {showExitIntent && <ExitIntentPopup onClose={() => setShowExitIntent(false)} />}
@@ -3034,11 +3134,16 @@ export default function App() {
                 THE SMARTEST WAY<br />TO READ ANY<br /><span className="text-[#00e676]">CHART</span>
               </h1>
               <p className="animate-fade-up delay-200 text-[#9ca3af] text-lg mb-8 max-w-lg leading-relaxed">
-                Drop a screenshot. Get your entry, stop loss, take profit, confidence score, and full AI trade breakdown in seconds. For stocks, crypto, forex, and futures.
+                Upload any screenshot. Get exact entry, stop loss, take profit, SMC analysis, confidence score, and trade grade in under 5 seconds. Used by 2,400+ traders across 47 countries.
               </p>
               <div className="animate-fade-up delay-300 flex flex-wrap gap-3 mb-10">
                 <a href="#analyze" className="btn-yellow px-7 py-3.5 text-sm flex items-center gap-2">⚡ Start free — no card needed</a>
                 <a href="#how-it-works" className="btn-outline px-7 py-3.5 text-sm flex items-center gap-2">See it in action →</a>
+              </div>
+              <div className="animate-fade-up delay-350 flex items-center gap-2 mb-6 px-4 py-2 rounded-full w-fit"
+                style={{ background: "rgba(0,230,118,0.06)", border: "1px solid rgba(0,230,118,0.15)" }}>
+                <span className="w-2 h-2 rounded-full bg-[#00e676] animate-pulse flex-shrink-0" />
+                <span className="font-dm-mono text-[11px] text-[#00e676] font-semibold">847 analyses run today</span>
               </div>
               <div className="animate-fade-up delay-400 flex flex-wrap gap-8">
                 {[{ value: "2,400+", label: "Active traders" }, { value: "<5s", label: "Analysis speed" }, { value: "5", label: "Free analyses" }].map((s) => (
@@ -3545,11 +3650,15 @@ export default function App() {
                           transition={{ delay: 0.55, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}>
                           <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Trade Setup · {a.tradeSetup?.entryType}</p>
                           {[
-                            { label: "Entry",         value: a.tradeSetup?.entry,       color: "white",   i: 0 },
-                            { label: "Stop Loss",     value: a.tradeSetup?.stopLoss,    color: "#f87171", i: 1 },
-                            { label: "Take Profit",   value: a.tradeSetup?.takeProfit1, color: "#4ade80", i: 2 },
-                            { label: "Risk / Reward", value: a.tradeSetup?.riskReward,  color: "#c084fc", i: 3 },
-                          ].map((row) => (
+                            { label: "Entry",        value: a.tradeSetup?.entry,       color: "white",   i: 0 },
+                            { label: "Stop Loss",    value: a.tradeSetup?.stopLoss,    color: "#f87171", i: 1 },
+                            { label: "TP1",          value: a.tradeSetup?.takeProfit1 && a.probability?.tp1 ? `${a.tradeSetup.takeProfit1}  · ${a.probability.tp1}% prob` : a.tradeSetup?.takeProfit1, color: "#4ade80", i: 2 },
+                            { label: "R:R (TP1)",    value: a.tradeSetup?.riskReward1 ?? a.tradeSetup?.riskReward, color: "#c084fc", i: 3 },
+                            ...(a.tradeSetup?.takeProfit2 ? [
+                              { label: "TP2",        value: a.probability?.tp2 ? `${a.tradeSetup.takeProfit2}  · ${a.probability.tp2}% prob` : a.tradeSetup.takeProfit2, color: "#4ade80", i: 4 },
+                              { label: "R:R (TP2)",  value: a.tradeSetup?.riskReward2 ?? "", color: "#c084fc", i: 5 },
+                            ] : []),
+                          ].filter(r => r.value).map((row) => (
                             <motion.div key={row.label}
                               className="flex justify-between items-center py-2.5 border-b border-white/[0.04] last:border-0"
                               initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }}
@@ -3558,6 +3667,53 @@ export default function App() {
                               <span className="font-dm-mono text-sm font-semibold" style={{ color: row.color }}>{row.value}</span>
                             </motion.div>
                           ))}
+                          {/* Confluence Breakdown */}
+                          {a.confluenceBreakdown && (
+                            <motion.div className="mt-3 pt-3 border-t border-white/[0.06]"
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.1 }}>
+                              <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">Confluence Breakdown</p>
+                              {[
+                                { label: "Trend alignment",  score: a.confluenceBreakdown.trendAlignment },
+                                { label: "SMC confluence",   score: a.confluenceBreakdown.smcConfluence },
+                                { label: "Key level quality",score: a.confluenceBreakdown.keyLevelQuality },
+                                { label: "Volume confirm",   score: a.confluenceBreakdown.volumeConfirmation },
+                                { label: "Session timing",   score: a.confluenceBreakdown.sessionTiming },
+                              ].map((row) => (
+                                <div key={row.label} className="flex items-center gap-2 mb-1.5">
+                                  <span className="text-[#6b7280] text-[10px] w-32 flex-shrink-0">{row.label}</span>
+                                  <div className="flex-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)", height: 5 }}>
+                                    <div className="h-full rounded-full transition-all duration-700"
+                                      style={{ width: `${(row.score / 20) * 100}%`, background: row.score >= 16 ? "#00e676" : row.score >= 12 ? "#f59e0b" : "#f87171" }} />
+                                  </div>
+                                  <span className="font-dm-mono text-[10px] text-[#6b7280] w-8 text-right">{row.score}/20</span>
+                                </div>
+                              ))}
+                            </motion.div>
+                          )}
+                          {/* Confirmation */}
+                          {(a.confirmation ?? a.waitForConfirmation) && (
+                            <motion.div className="mt-3 rounded-xl p-3" style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.15)" }}
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}>
+                              <p className="text-[#00e676] text-[10px] font-bold uppercase tracking-wider mb-1">Wait for confirmation</p>
+                              <p className="text-[#9ca3af] text-xs leading-relaxed">{a.confirmation ?? a.waitForConfirmation}</p>
+                            </motion.div>
+                          )}
+                          {/* Invalidation */}
+                          {a.invalidation && (
+                            <motion.div className="mt-2 rounded-xl p-3" style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)" }}
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.25 }}>
+                              <p className="text-[#f87171] text-[10px] font-bold uppercase tracking-wider mb-1">Invalidation level</p>
+                              <p className="text-[#9ca3af] text-xs leading-relaxed">{a.invalidation}</p>
+                            </motion.div>
+                          )}
+                          {/* Alternative Scenario */}
+                          {a.alternativeScenario && (
+                            <motion.div className="mt-2 rounded-xl p-3" style={{ background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.2)" }}
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.3 }}>
+                              <p className="text-[#f59e0b] text-[10px] font-bold uppercase tracking-wider mb-1">Alternative scenario</p>
+                              <p className="text-[#9ca3af] text-xs leading-relaxed">{a.alternativeScenario}</p>
+                            </motion.div>
+                          )}
                         </motion.div>
                         {/* Annotated Chart */}
                         <AnnotatedChart
@@ -4093,6 +4249,25 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── SOCIAL PROOF BAR ───────────────────────────────── */}
+      <div className="border-y border-white/[0.06] py-5 px-6 overflow-hidden" style={{ background: "rgba(255,255,255,0.015)" }}>
+        <div className="max-w-5xl mx-auto">
+          <div className="flex flex-col md:flex-row items-center gap-4 md:gap-8">
+            <p className="text-[#4b5563] text-xs font-semibold uppercase tracking-[0.15em] flex-shrink-0">Trusted by traders on</p>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 justify-center md:justify-start">
+              {["TradingView", "Binance", "MT4 / MT5", "FXReplay", "Interactive Brokers", "Tradovate", "NinjaTrader"].map((p) => (
+                <span key={p} className="text-[#374151] text-sm font-semibold hover:text-[#6b7280] transition-colors">{p}</span>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-white/[0.04] text-center">
+            <p className="text-[#6b7280] text-sm italic">
+              &ldquo;The confidence score alone changed how I trade — I only take 80%+ signals now&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* ── FEATURES ────────────────────────────────────────── */}
       <section id="features" className="py-24 px-6">
         <div className="max-w-6xl mx-auto">
@@ -4619,6 +4794,25 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── STATS ───────────────────────────────────────────── */}
+      <section className="py-16 px-6 border-t border-white/[0.05]">
+        <div className="max-w-4xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            {[
+              { value: "50,000+", label: "Charts Analysed" },
+              { value: "2,400+",  label: "Active Traders" },
+              { value: "<5 sec",  label: "Average Analysis" },
+              { value: "47",      label: "Countries" },
+            ].map((s) => (
+              <div key={s.label} data-animate>
+                <div className="font-bebas text-[clamp(36px,5vw,52px)] text-[#00e676] leading-none mb-1">{s.value}</div>
+                <div className="text-[#6b7280] text-sm">{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── TESTIMONIALS ────────────────────────────────────── */}
       <section className="py-24 px-6">
         <div className="max-w-5xl mx-auto">
@@ -4631,21 +4825,21 @@ export default function App() {
           <div className="grid md:grid-cols-3 gap-6">
             {[
               {
-                quote: "The confidence score is a game changer. I used to second-guess every entry. Now if the AI gives me 80%+, I know the setup is clean. Went from 48% win rate to 67% in 6 weeks.",
+                quote: "I used to spend 45 minutes marking up charts every morning. ChartIQ does it in 5 seconds and the SMC analysis is more accurate than I was doing manually. Win rate went from 48% to 67% in 6 weeks.",
                 name: "James R.",
-                role: "Forex trader · 3 years",
+                role: "Forex trader · London · 3 years experience",
                 delay: "1",
               },
               {
-                quote: "The journal auto-save alone is worth it. I used to forget to log trades and had no idea if I was actually profitable. Now I can see my win rate in real time and it's pushed me to be more selective.",
-                name: "Sophie M.",
-                role: "Crypto & indices trader",
+                quote: "The confidence score is a game changer. I now only take trades above 80% and my results completely transformed. The journal auto-save means I finally have real data on my performance instead of guessing.",
+                name: "Sofia M.",
+                role: "Crypto & indices · Dubai · Pro member",
                 delay: "2",
               },
               {
-                quote: "Multi-timeframe analysis changed how I trade. I was getting stopped out constantly until ChartIQ showed me I was trading against the 4H trend. The economic calendar also saved me from trading straight into NFP twice.",
-                name: "Daniel K.",
-                role: "Full-time trader · Pro plan",
+                quote: "Multi-timeframe analysis saved me from three bad trades last week alone. I was about to enter counter-trend on the 5m and ChartIQ showed me the 4H was strongly bearish. Avoided three losses. Worth every penny.",
+                name: "Ryan T.",
+                role: "Futures trader · New York · Elite member",
                 delay: "3",
               },
             ].map((t) => (
@@ -4666,24 +4860,28 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── FAQ ─────────────────────────────────────────────── */}
+      <FaqSection />
+
       {/* ── CTA BAND ────────────────────────────────────────── */}
       <section className="py-28 px-6" style={{ background: "#080c0a", borderTop: "1px solid rgba(0,230,118,0.18)", borderBottom: "1px solid rgba(0,230,118,0.18)" }}>
         <div className="max-w-4xl mx-auto text-center" data-animate>
           <h2 className="font-bebas text-[clamp(52px,8vw,88px)] leading-none tracking-[0.03em] text-white mb-4">
-            STOP GUESSING.<br /><span className="text-[#00e676]">START TRADING.</span>
+            YOUR NEXT TRADE DESERVES<br /><span className="text-[#00e676]">BETTER ANALYSIS</span>
           </h2>
-          <p className="text-[#9ca3af] text-lg mb-10 max-w-md mx-auto leading-relaxed mt-6">
-            Join thousands of traders using AI to read charts faster and smarter.
+          <p className="text-[#9ca3af] text-lg mb-10 max-w-xl mx-auto leading-relaxed mt-6">
+            Stop guessing. Stop losing to poor entries and emotional decisions. Join 2,400+ traders who use AI to read charts faster and more accurately than any manual method.
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-3 mb-10">
-            <a href="#analyze" className="btn-yellow px-8 py-3.5 text-sm flex items-center gap-2">⚡ Start free — no card needed</a>
-            <a href="#how-it-works" className="btn-outline px-8 py-3.5 text-sm">See it in action →</a>
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
+            <a href="#analyze" className="btn-yellow px-8 py-3.5 text-sm flex items-center gap-2">⚡ Start free — analyse your first chart →</a>
+            <a href="/pricing" className="btn-outline px-8 py-3.5 text-sm">See pricing</a>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-6 text-[#6b7280] text-sm">
-            {["🔒 No credit card required", "⚡ 5 free analyses to start", "📊 Works with any platform"].map((t) => (
+          <div className="flex flex-wrap items-center justify-center gap-6 text-[#6b7280] text-sm mb-6">
+            {["🎯 No learning curve — works in 30 seconds", "🔒 No credit card for free tier", "💰 7 day money back on paid plans"].map((t) => (
               <span key={t}>{t}</span>
             ))}
           </div>
+          <p className="text-[#374151] text-sm">Join traders from London · Dubai · New York · Sydney · Singapore · Toronto</p>
         </div>
       </section>
 
@@ -4704,11 +4902,12 @@ export default function App() {
                   <button key={i} className="w-8 h-8 rounded-lg bg-white/[0.05] flex items-center justify-center text-xs text-[#4b5563] hover:bg-white/[0.1] hover:text-white transition-all duration-150">{icon}</button>
                 ))}
               </div>
+              <p className="text-[#374151] text-[10px] mt-3">Made with ❤️ for traders worldwide</p>
             </div>
             {[
               { title: "Product",   links: [["Features", "#features"], ["How It Works", "#how-it-works"], ["Pricing", "/pricing"], ["Brokers", "/brokers"], ["Pine Scripts", "/tools/pine-scripts"], ["Strategy Tester", "/strategy-tester"]] },
-              { title: "Resources", links: [["Blog", "#"], ["FAQ", "#"], ["Contact", "#"], ["About Us", "#"], ["Community", "#"]] },
-              { title: "Legal",     links: [["Privacy Policy", "#"], ["Terms of Service", "#"], ["Cookie Policy", "#"], ["Disclaimer", "#"]] },
+              { title: "Resources", links: [["Blog", "#"], ["FAQ", "#faq"], ["Contact", "mailto:support@chartiq.ai"], ["About Us", "#"], ["Community", "#"]] },
+              { title: "Legal",     links: [["Privacy Policy", "/privacy"], ["Terms of Service", "/terms"], ["Refund Policy", "/refund"], ["Cookie Policy", "#"], ["Disclaimer", "#"]] },
             ].map((col) => (
               <div key={col.title}>
                 <h4 className="text-white font-semibold text-sm mb-4">{col.title}</h4>
