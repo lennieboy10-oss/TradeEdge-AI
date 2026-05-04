@@ -24,6 +24,13 @@ export type JournalEntry = {
   historical_avg_r?: number | null;
   historical_sample_size?: number | null;
   historical_grade?: string | null;
+  pnl?: number | null;
+  r_achieved?: number | null;
+  exit_time?: string | null;
+  reviewed?: boolean | null;
+  review_notes?: string | null;
+  manually_added?: boolean | null;
+  client_id?: string | null;
 };
 
 export type JournalInsert = Omit<JournalEntry, "id" | "created_at" | "outcome" | "notes">;
