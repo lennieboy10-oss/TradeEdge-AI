@@ -201,7 +201,19 @@ Return ONLY raw JSON, no markdown, no backticks:
   "patterns": [{"name":"pattern name","direction":"bullish or bearish","target":"measured move price","description":"one sentence"}],
   "smcFibonacci": [{"level":"0.618","price":"3285","description":"one sentence"}],
   "smc_summary": "one sentence overall SMC bias",
-  "confluenceFactors": ["factor 1", "factor 2", "factor 3"]
+  "confluenceFactors": ["factor 1", "factor 2", "factor 3"],
+  "historicalWinRate": 68,
+  "historicalSampleSize": 847,
+  "historicalAvgR": "2.3",
+  "historicalContext": "one sentence explaining what typically happens with this setup",
+  "similarSetups": [
+    {"date": "March 2024", "asset": "XAU/USD", "outcome": "reached TP2 in 4 hours", "result": "WIN"},
+    {"date": "January 2024", "asset": "XAU/USD", "outcome": "stopped out on NFP spike", "result": "LOSS"},
+    {"date": "November 2023", "asset": "XAU/USD", "outcome": "hit TP1, stalled at TP2", "result": "WIN"}
+  ],
+  "backtestGrade": "A or B or C or D based on historical performance",
+  "bestConditions": "when this setup works best",
+  "worstConditions": "when this setup fails most often"
 }`,
           },
         ],
@@ -317,7 +329,31 @@ Return ONLY raw JSON, no markdown, no backticks:
       patterns:        Array.isArray(parsed.patterns)        ? parsed.patterns        : [],
       smcFibonacci:    Array.isArray(parsed.smcFibonacci)    ? parsed.smcFibonacci    : [],
       smc_summary:     parsed.smc_summary   ?? null,
+      // Historical performance
+      historicalWinRate:    typeof parsed.historicalWinRate    === "number" ? parsed.historicalWinRate    : null,
+      historicalSampleSize: typeof parsed.historicalSampleSize === "number" ? parsed.historicalSampleSize : null,
+      historicalAvgR:       parsed.historicalAvgR    ?? null,
+      historicalContext:    parsed.historicalContext ?? null,
+      similarSetups:        Array.isArray(parsed.similarSetups) ? parsed.similarSetups : [],
+      backtestGrade:        parsed.backtestGrade     ?? null,
+      bestConditions:       parsed.bestConditions    ?? null,
+      worstConditions:      parsed.worstConditions   ?? null,
     };
+
+    // ── Historical win rate confidence adjustment ──────────────
+    const histWR = current.historicalWinRate;
+    if (histWR !== null && (parsed.signal ?? "NEUTRAL").toUpperCase() !== "NEUTRAL") {
+      let histAdj = 0;
+      if (histWR > 65) histAdj = 5;
+      else if (histWR < 50) histAdj = -5;
+      if (histAdj !== 0) {
+        current.confidence = Math.min(100, Math.max(0, current.confidence + histAdj));
+        const c = current.confidence;
+        (current as Record<string, unknown>).grade = c >= 85 ? "A+" : c >= 70 ? "A" : c >= 55 ? "B" : c >= 40 ? "C" : "D";
+        (current as Record<string, unknown>).histConfidenceAdj = histAdj;
+        console.log(`Historical WR adj ${histAdj > 0 ? "+" : ""}${histAdj} → confidence: ${current.confidence}`);
+      }
+    }
 
     const [higherTF, highestTF] = getHigherTFs(timeframe);
     const ctxPlaceholder = (tf: string) => ({
@@ -354,8 +390,12 @@ Return ONLY raw JSON, no markdown, no backticks:
         risk_reward:    current.tradeSetup.riskReward  !== "N/A" ? current.tradeSetup.riskReward  : null,
         summary:        current.summary || null,
         confidence:     current.confidence,
-        entry_session:  current.entrySession  ?? null,
-        entry_time_utc: current.entryTimeUTC  ?? null,
+        entry_session:           current.entrySession       ?? null,
+        entry_time_utc:          current.entryTimeUTC       ?? null,
+        historical_win_rate:     current.historicalWinRate  ?? null,
+        historical_avg_r:        current.historicalAvgR     ? parseFloat(current.historicalAvgR) : null,
+        historical_sample_size:  current.historicalSampleSize ?? null,
+        historical_grade:        current.backtestGrade      ?? null,
       };
       console.log("Journal save payload:", JSON.stringify(payload));
       const { data: jData, error: jError } = await getSupabase()

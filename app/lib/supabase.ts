@@ -20,6 +20,10 @@ export type JournalEntry = {
   user_id: string | null;
   entry_session: string | null;
   entry_time_utc: string | null;
+  historical_win_rate?: number | null;
+  historical_avg_r?: number | null;
+  historical_sample_size?: number | null;
+  historical_grade?: string | null;
 };
 
 export type JournalInsert = Omit<JournalEntry, "id" | "created_at" | "outcome" | "notes">;

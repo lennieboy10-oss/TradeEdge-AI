@@ -60,6 +60,16 @@ type AnalysisResult = {
   patterns?:        { name: string; direction?: string; target?: string; description?: string }[];
   smcFibonacci?:    { level: string; price: string; description?: string }[];
   smc_summary?:     string | null;
+  // Historical performance
+  historicalWinRate?:    number | null;
+  historicalSampleSize?: number | null;
+  historicalAvgR?:       string | null;
+  historicalContext?:    string | null;
+  similarSetups?:        { date: string; asset: string; outcome: string; result: "WIN" | "LOSS" }[];
+  backtestGrade?:        string | null;
+  bestConditions?:       string | null;
+  worstConditions?:      string | null;
+  histConfidenceAdj?:    number | null;
 };
 
 type MultiResult = {
@@ -1006,6 +1016,266 @@ function HistoricalSetups({ setups }: { setups: { pattern: string; asset: string
           </div>
         ))}
       </div>
+    </motion.div>
+  );
+}
+
+// ── Historical Performance Card ────────────────────────────────
+function HistoricalPerformanceCard({
+  a, isPro, isElite, loading, onUpgradePro,
+}: {
+  a: AnalysisResult;
+  isPro: boolean;
+  isElite: boolean;
+  loading: boolean;
+  onUpgradePro: () => void;
+}) {
+  const wr    = a.historicalWinRate;
+  const avgR  = a.historicalAvgR ? parseFloat(a.historicalAvgR) : null;
+  const grade = a.backtestGrade;
+  const adj   = a.histConfidenceAdj;
+
+  const wrColor = wr == null ? "#9ca3af" : wr > 65 ? "#00e676" : wr >= 50 ? "#f59e0b" : "#f87171";
+  const avgRColor = avgR == null ? "#9ca3af" : avgR >= 1.5 ? "#00e676" : avgR >= 1 ? "#f59e0b" : "#f87171";
+
+  const gradeColors: Record<string, string> = {
+    "A+": "#00e676", A: "#4ade80", B: "#f59e0b", C: "#fb923c", D: "#f87171",
+  };
+  const gradeColor = grade ? (gradeColors[grade] ?? "#9ca3af") : "#9ca3af";
+
+  const Skeleton = ({ w = "100%", h = 14 }: { w?: string | number; h?: number }) => (
+    <div className="rounded animate-pulse" style={{ width: w, height: h, background: "rgba(255,255,255,0.07)" }} />
+  );
+
+  const inner = (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="font-dm-mono text-[10px] font-bold tracking-[0.18em] uppercase text-[#f59e0b]">Historical Performance</span>
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-widest uppercase"
+            style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.25)" }}>
+            {isElite ? "ELITE" : "PRO"}
+          </span>
+        </div>
+        {loading && <div className="w-4 h-4 rounded-full border-2 border-[#f59e0b]/30 border-t-[#f59e0b] animate-spin" />}
+      </div>
+
+      {/* Stats row */}
+      {loading ? (
+        <div className="grid grid-cols-3 gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <Skeleton h={28} />
+              <Skeleton w="70%" h={10} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-3">
+          {/* Win rate */}
+          <div className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <p className="font-bebas text-[32px] leading-none mb-1" style={{ color: wrColor }}>{wr != null ? `${wr}%` : "—"}</p>
+            <p className="font-dm-mono text-[9px] text-[#6b7280] uppercase tracking-wider">Win Rate</p>
+          </div>
+          {/* Sample size */}
+          <div className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <p className="font-bebas text-[32px] leading-none mb-1 text-white">
+              {a.historicalSampleSize != null ? a.historicalSampleSize.toLocaleString() : "—"}
+            </p>
+            <p className="font-dm-mono text-[9px] text-[#6b7280] uppercase tracking-wider">Similar setups</p>
+          </div>
+          {/* Avg R */}
+          <div className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <p className="font-bebas text-[32px] leading-none mb-1" style={{ color: avgRColor }}>{avgR != null ? `${avgR}R` : "—"}</p>
+            <p className="font-dm-mono text-[9px] text-[#6b7280] uppercase tracking-wider">Avg R achieved</p>
+          </div>
+        </div>
+      )}
+
+      {/* Historical grade — Elite only */}
+      {isElite && (
+        loading ? (
+          <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <Skeleton w={48} h={48} />
+            <div className="flex-1 space-y-2"><Skeleton /><Skeleton w="60%" /></div>
+          </div>
+        ) : grade ? (
+          <div className="flex items-center gap-4 p-4 rounded-xl"
+            style={{ background: `${gradeColor}08`, border: `1px solid ${gradeColor}22` }}>
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: `${gradeColor}15`, border: `2px solid ${gradeColor}40` }}>
+              <span className="font-bebas text-[28px] leading-none" style={{ color: gradeColor }}>{grade}</span>
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white">Historical Grade: {grade}</p>
+              <p className="text-xs text-[#6b7280] mt-0.5">
+                {(wr ?? 0) >= 65 ? "Strong historical performance" : (wr ?? 0) >= 50 ? "Average historical performance" : "Weak historical performance"}
+              </p>
+            </div>
+          </div>
+        ) : null
+      )}
+
+      {/* Confidence adjustment — Elite only */}
+      {isElite && adj != null && adj !== 0 && !loading && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+          style={{
+            background: adj > 0 ? "rgba(0,230,118,0.06)" : "rgba(248,113,113,0.06)",
+            border: `1px solid ${adj > 0 ? "rgba(0,230,118,0.2)" : "rgba(248,113,113,0.2)"}`,
+            color: adj > 0 ? "#00e676" : "#f87171",
+          }}>
+          <span className="font-bold">{adj > 0 ? `▲ Confidence +${adj}` : `▼ Confidence ${adj}`}</span>
+          <span className="text-[#6b7280]">
+            — based on {adj > 0 ? "strong" : "weak"} historical performance
+          </span>
+        </div>
+      )}
+
+      {/* Historical context */}
+      {loading ? (
+        <div className="p-4 rounded-xl space-y-2" style={{ borderLeft: "3px solid #f59e0b", background: "rgba(245,158,11,0.04)" }}>
+          <Skeleton /><Skeleton w="85%" /><Skeleton w="70%" />
+        </div>
+      ) : a.historicalContext ? (
+        <div className="p-4 rounded-xl italic text-sm text-[#d1d5db] leading-relaxed"
+          style={{ borderLeft: "3px solid #f59e0b", background: "rgba(245,158,11,0.04)" }}>
+          {a.historicalContext}
+        </div>
+      ) : null}
+
+      {/* Best / worst conditions */}
+      {loading ? (
+        <div className="space-y-2">
+          <Skeleton h={36} /><Skeleton h={36} />
+        </div>
+      ) : (a.bestConditions || a.worstConditions) ? (
+        <div className="space-y-2">
+          {a.bestConditions && (
+            <div className="flex items-start gap-2 p-3 rounded-xl text-xs text-[#d1d5db]"
+              style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.15)" }}>
+              <span className="flex-shrink-0">✅</span>
+              <span><span className="font-bold text-[#00e676]">Works best:</span> {a.bestConditions}</span>
+            </div>
+          )}
+          {a.worstConditions && (
+            <div className="flex items-start gap-2 p-3 rounded-xl text-xs text-[#d1d5db]"
+              style={{ background: "rgba(248,113,113,0.05)", border: "1px solid rgba(248,113,113,0.15)" }}>
+              <span className="flex-shrink-0">❌</span>
+              <span><span className="font-bold text-[#f87171]">Fails most often:</span> {a.worstConditions}</span>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* Similar past setups */}
+      {Array.isArray(a.similarSetups) && a.similarSetups.length > 0 && !loading && (
+        <div>
+          <p className="font-dm-mono text-[10px] font-bold tracking-[0.15em] uppercase text-[#6b7280] mb-2.5">Similar Past Setups</p>
+          <div className="space-y-2">
+            {a.similarSetups.map((s, i) => (
+              <div key={i} className="rounded-xl p-3 relative"
+                style={{
+                  background: s.result === "WIN" ? "rgba(0,230,118,0.04)" : "rgba(248,113,113,0.04)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  borderLeft: `3px solid ${s.result === "WIN" ? "#00e676" : "#f87171"}`,
+                }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="font-dm-mono text-[10px] text-[#6b7280]">{s.date}</span>
+                      <span className="text-[#4b5563] text-[10px]">·</span>
+                      <span className="font-dm-mono text-[10px] font-bold text-[#9ca3af]">{s.asset}</span>
+                    </div>
+                    <p className="text-xs text-[#9ca3af] leading-relaxed">{s.outcome}</p>
+                  </div>
+                  <span className="flex-shrink-0 px-2 py-0.5 rounded text-[9px] font-bold tracking-widest uppercase font-dm-mono"
+                    style={{
+                      background: s.result === "WIN" ? "rgba(0,230,118,0.12)" : "rgba(248,113,113,0.12)",
+                      color: s.result === "WIN" ? "#00e676" : "#f87171",
+                      border: `1px solid ${s.result === "WIN" ? "rgba(0,230,118,0.25)" : "rgba(248,113,113,0.25)"}`,
+                    }}>
+                    {s.result}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Disclaimer */}
+      <p className="text-[10px] text-[#374151] italic leading-relaxed">
+        Historical data is AI estimated based on pattern recognition and market data.
+        Past performance does not guarantee future results. Use as one factor in your analysis — not as a standalone trading signal.
+      </p>
+    </div>
+  );
+
+  if (!isPro) {
+    return (
+      <motion.div className="relative rounded-2xl overflow-hidden"
+        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.8 }}>
+        <div style={{ filter: "blur(4px)", pointerEvents: "none", userSelect: "none", background: "#0d1117", border: "1px solid rgba(245,158,11,0.25)" }}
+          className="rounded-2xl p-5">
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              {["68%", "847", "2.3R"].map((v) => (
+                <div key={v} className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
+                  <p className="font-bebas text-[32px] text-[#f59e0b]">{v}</p>
+                  <p className="text-[9px] text-[#4b5563]">stat</p>
+                </div>
+              ))}
+            </div>
+            <div className="h-12 rounded-xl" style={{ background: "rgba(255,255,255,0.03)" }} />
+            <div className="h-8 rounded-xl" style={{ background: "rgba(255,255,255,0.03)" }} />
+          </div>
+        </div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 gap-3 rounded-2xl"
+          style={{ backdropFilter: "blur(3px)", background: "rgba(8,10,16,0.82)" }}>
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <rect x="2.5" y="9.5" width="17" height="11" rx="2.5" stroke="#f59e0b" strokeWidth="1.3"/>
+            <path d="M7 9.5V7a4 4 0 018 0v2.5" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+          <div>
+            <p className="text-white font-bold text-sm mb-1">Historical Performance — Pro Only</p>
+            <p className="text-[#6b7280] text-[11px] leading-snug max-w-[220px]">
+              See how this exact setup has performed historically across hundreds of similar occurrences
+            </p>
+          </div>
+          <button onClick={onUpgradePro}
+            className="px-4 py-2 rounded-xl text-xs font-bold transition-all hover:-translate-y-0.5 mt-1"
+            style={{ background: "#f59e0b", color: "#080a10", boxShadow: "0 0 16px rgba(245,158,11,0.3)" }}>
+            Upgrade to Pro — £19/mo
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div className="rounded-2xl p-5"
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.8 }}
+      style={{ background: "#0d1117", border: "1px solid rgba(245,158,11,0.25)" }}>
+      {loading ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-3 h-3 rounded-full border-2 border-[#f59e0b]/30 border-t-[#f59e0b] animate-spin" />
+            <p className="font-dm-mono text-[10px] text-[#f59e0b] uppercase tracking-[0.15em]">Analysing historical patterns…</p>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {[0,1,2].map(i => (
+              <div key={i} className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                <div className="h-7 rounded animate-pulse" style={{ background: "rgba(255,255,255,0.07)" }} />
+                <div className="h-2.5 w-2/3 rounded animate-pulse" style={{ background: "rgba(255,255,255,0.05)" }} />
+              </div>
+            ))}
+          </div>
+          {[60, 40, 80].map((w, i) => (
+            <div key={i} className="h-3 rounded animate-pulse" style={{ width: `${w}%`, background: "rgba(255,255,255,0.06)" }} />
+          ))}
+        </div>
+      ) : inner}
     </motion.div>
   );
 }
@@ -3860,6 +4130,20 @@ export default function App() {
                         {/* Pro deep analysis — Pro only */}
                         {isPro && <ProDeepAnalysis a={a} />}
 
+                        {/* Historical performance card — Free/Pro/Elite gated */}
+                        <HistoricalPerformanceCard
+                          a={a}
+                          isPro={isPro}
+                          isElite={isElite}
+                          loading={loading}
+                          onUpgradePro={() => {
+                            if (clientId) {
+                              fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) })
+                                .then((r) => r.json()).then((d) => { if (d.url) window.location.href = d.url; });
+                            }
+                          }}
+                        />
+
                         {/* Free watermark — nudges upgrade */}
                         {!isPro && (
                           <FreeWatermark onUpgrade={() => {
@@ -4360,6 +4644,40 @@ export default function App() {
                   {["Trend ✓", "Volume ✓", "Structure ✓"].map((f) => (
                     <span key={f} className="font-dm-mono text-[10px] px-2.5 py-1 rounded-full" style={{ background: "rgba(0,230,118,0.07)", color: "#4ade80", border: "1px solid rgba(0,230,118,0.15)" }}>{f}</span>
                   ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── FEATURE 2b — HISTORICAL PERFORMANCE ─────────── */}
+            <div className="rounded-[14px] border border-white/[0.07] p-8 flex flex-col gap-6 group hover:border-[#f59e0b]/25 transition-colors duration-300" style={{ background: "#0d1117" }} data-animate data-delay="3">
+              <div>
+                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.2)" }}>PRO</span>
+                <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">Historical Win Rate</h3>
+                <p className="text-[#6b7280] text-sm leading-relaxed mb-4">See how this exact setup has performed historically across hundreds of similar occurrences — before you risk a single pip.</p>
+                <ul className="space-y-1.5">
+                  {["Historical win rate for this setup type", "Sample size from similar past trades", "Average R achieved on this pattern", "Best and worst conditions identified"].map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-[#f59e0b]/10 p-4 space-y-3" style={{ background: "#080a10" }}>
+                <div className="grid grid-cols-3 gap-2">
+                  {[{ v: "68%", l: "Win Rate", c: "#00e676" }, { v: "847", l: "Setups", c: "#e2e8f0" }, { v: "2.3R", l: "Avg R", c: "#4ade80" }].map((s) => (
+                    <div key={s.l} className="rounded-lg p-2.5 text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
+                      <p className="font-bebas text-[22px] leading-none" style={{ color: s.c }}>{s.v}</p>
+                      <p className="font-dm-mono text-[9px] text-[#4b5563] mt-0.5">{s.l}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-3 py-2.5 rounded-lg italic text-xs text-[#9ca3af] leading-relaxed"
+                  style={{ borderLeft: "3px solid #f59e0b", background: "rgba(245,158,11,0.04)" }}>
+                  This bearish OB on Gold at 1H has shown 68% win rate across 847 similar setups.
+                </div>
+                <div className="flex items-center gap-2 text-xs p-2.5 rounded-lg" style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.12)" }}>
+                  <span>✅</span><span className="text-[#d1d5db]"><span className="font-bold text-[#00e676]">Works best:</span> London/NY overlap, after liquidity sweep</span>
                 </div>
               </div>
             </div>

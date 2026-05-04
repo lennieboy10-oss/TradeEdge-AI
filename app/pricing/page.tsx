@@ -34,11 +34,13 @@ const proFeatures = [
   "Economic calendar",
   "AI coaching & chat",
   "Multi-timeframe confluence",
+  "Historical win rate & pattern context",
   "Priority support",
 ];
 
 const eliteFeatures = [
   "Everything in Pro",
+  "Full historical analysis with similar setups & grade",
   "ChartIQ AI Signal System indicator",
   "Unlimited indicator downloads",
   "Future indicator updates — free",

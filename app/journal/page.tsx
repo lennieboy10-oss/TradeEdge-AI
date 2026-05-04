@@ -403,6 +403,17 @@ function JournalRow({ entry, onUpdate, onDelete }: {
                 Confidence <span className="font-dm-mono ml-1" style={{ color: entry.confidence >= 75 ? "#4ade80" : entry.confidence >= 50 ? "#9ca3af" : "#f87171" }}>{entry.confidence}%</span>
               </span>
             )}
+            {entry.historical_win_rate != null && (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-dm-mono font-bold"
+                style={{
+                  background: "rgba(245,158,11,0.08)",
+                  border: "1px solid rgba(245,158,11,0.2)",
+                  color: entry.historical_win_rate > 65 ? "#4ade80" : entry.historical_win_rate >= 50 ? "#f59e0b" : "#f87171",
+                }}>
+                Hist: {entry.historical_win_rate}%
+                {entry.historical_grade && <span className="ml-1.5 text-[#6b7280]">{entry.historical_grade}</span>}
+              </span>
+            )}
           </div>
 
           {entry.summary && (
