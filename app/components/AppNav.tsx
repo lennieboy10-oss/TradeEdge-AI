@@ -31,6 +31,7 @@ const TOOLS_ITEMS = [
   { label: "Journal",           href: "/journal",                   icon: "📓" },
   { label: "Elite Indicator",   href: "/tools/elite-indicator",     icon: "🔮" },
   { label: "Market Scanner",    href: "/scanner",                   icon: "📡" },
+  { label: "Prop Firm Mode",    href: "/prop-firm",                 icon: "🏦" },
 ];
 
 const COMMUNITY_ITEMS = [
