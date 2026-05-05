@@ -112,7 +112,7 @@ Identify exact swing highs and lows. State clearly whether structure is bullish 
 - Market Zone: premium (top 25% of range — prefer shorts), discount (bottom 25% — prefer longs), neutral.
 
 3. ENTRY PRECISION:
-Entry must be within 5 pips/points. Give exact price and exact reason (retracement level + FVG alignment, etc.). State the confirmation required: e.g. "Wait for bearish engulfing close on 5m at this level".
+Entry must be within 3 price units (pips/points/ticks as appropriate for the asset). Give exact price and exact reason (retracement level + FVG alignment, etc.). Provide bestEntry (optimal limit) and worstEntry (maximum acceptable). State the exact confirmation trigger required before entering.
 
 4. STOP LOSS — STRUCTURE BASED ONLY:
 Place stop beyond the nearest structural level — never arbitrary ATR stops. State exactly what invalidates the setup.
@@ -213,7 +213,13 @@ Return ONLY raw JSON, no markdown, no backticks:
   ],
   "backtestGrade": "A or B or C or D based on historical performance",
   "bestConditions": "when this setup works best",
-  "worstConditions": "when this setup fails most often"
+  "worstConditions": "when this setup fails most often",
+  "bestEntry": "optimal entry price with exact reason e.g. 3287.50 — FVG midpoint with OB confluence",
+  "worstEntry": "maximum tolerable entry price e.g. 3291.00 — beyond here setup risk exceeds parameters",
+  "entryTrigger": "exact 1-sentence trigger e.g. 5m bearish engulfing close below 3292.00 confirms entry",
+  "tradeManagement": ["1. Set limit order at bestEntry", "2. Place SL beyond invalidation level", "3. Scale 50% out at TP1 — move SL to break-even", "4. Trail remaining 50% to TP2"],
+  "setupQualityScore": 82,
+  "verdictLine": "TAKE THIS TRADE — bearish OB + FVG confluence at premium zone, 2.4R to TP1, 71% historical win rate"
 }`,
           },
         ],
@@ -338,6 +344,13 @@ Return ONLY raw JSON, no markdown, no backticks:
       backtestGrade:        parsed.backtestGrade     ?? null,
       bestConditions:       parsed.bestConditions    ?? null,
       worstConditions:      parsed.worstConditions   ?? null,
+      // Upgrade 1 — precision fields
+      bestEntry:         parsed.bestEntry         ?? null,
+      worstEntry:        parsed.worstEntry        ?? null,
+      entryTrigger:      parsed.entryTrigger      ?? null,
+      tradeManagement:   Array.isArray(parsed.tradeManagement) ? parsed.tradeManagement : null,
+      setupQualityScore: typeof parsed.setupQualityScore === "number" ? parsed.setupQualityScore : null,
+      verdictLine:       parsed.verdictLine       ?? null,
     };
 
     // ── Historical win rate confidence adjustment ──────────────

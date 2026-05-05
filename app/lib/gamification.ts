@@ -56,6 +56,31 @@ export const XP = {
 } as const;
 export type XPAction = keyof typeof XP;
 
+// ── Week start (Monday UTC) ───────────────────────────────────
+export function getWeekStart(): string {
+  const d = new Date();
+  const day = d.getUTCDay(); // 0=Sun,1=Mon,...
+  const diff = day === 0 ? -6 : 1 - day;
+  const mon = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + diff));
+  return mon.toISOString().slice(0, 10);
+}
+
+// ── Readable action labels ─────────────────────────────────────
+export const XP_ACTION_LABELS: Record<string, string> = {
+  ANALYSIS_RUN:    "Analysis complete",
+  A_PLUS_GRADE:    "A+ grade earned",
+  HIGH_CONFIDENCE: "High confidence",
+  MULTI_TIMEFRAME: "Multi-timeframe",
+  LOG_OUTCOME:     "Trade logged",
+  ADD_NOTES:       "Notes added",
+  TRADES_5_BONUS:  "5 trades milestone",
+  TRADES_10_BONUS: "10 trades milestone",
+  RUN_BACKTEST:    "Backtest run",
+  SAVE_STRATEGY:   "Strategy saved",
+  MILESTONE:       "Milestone bonus",
+  BONUS:           "Daily challenge",
+};
+
 // ── Streak multiplier ─────────────────────────────────────────
 export function getStreakMultiplier(streak: number): number {
   if (streak >= 30) return 5;

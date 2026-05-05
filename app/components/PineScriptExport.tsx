@@ -13,10 +13,9 @@ interface Props {
   takeProfit2?: string;
   confidence?: number;
   isPro: boolean;
+  keyLevels?: { resistance: string[]; support: string[] };
 }
 
-// Strip commas and whitespace before any numeric operation.
-// "27,618.25" → "27618.25" → 27618.25
 function cleanPrice(raw: string | undefined | null): string {
   return String(raw ?? "0").replace(/,/g, "").trim();
 }
@@ -29,12 +28,12 @@ function generatePineScript(p: Props): string {
   const asset = p.asset ?? "ASSET";
   const tf    = p.timeframe ? ` · ${p.timeframe}` : "";
   const conf  = p.confidence ?? 0;
+  const today = new Date().toISOString().slice(0, 10);
 
   const sig   = (p.signal ?? "").toUpperCase();
   const dir   = sig === "SHORT" ? "SHORT" : sig === "NEUTRAL" ? "NEUTRAL" : "LONG";
   const isBuy = dir !== "SHORT";
 
-  // Strip commas from every price before any numeric operation
   const entryN = toNum(p.entry);
   const slN    = toNum(p.stopLoss);
   const tp1N   = toNum(p.takeProfit1);
@@ -47,18 +46,59 @@ function generatePineScript(p: Props): string {
 
   const grade = conf >= 90 ? "A+" : conf >= 80 ? "A" : conf >= 70 ? "B" : "C";
 
-  // Plain decimal strings — no commas, no locale formatting
   const E  = entryN.toFixed(2);
   const SL = slN.toFixed(2);
   const T1 = tp1N.toFixed(2);
   const T2 = tp2N.toFixed(2);
 
-  return `//@version=5
-indicator("ChartIQ AI Signal", overlay=true, max_lines_count=20, max_labels_count=20)
-// ChartIQ AI — ${asset}${tf} | ${dir} | ${conf}% | Grade: ${grade}
-// trade-edge-ai.vercel.app
+  const sigColor = dir === "LONG"
+    ? "color.rgb(0, 230, 118)"
+    : dir === "SHORT"
+    ? "color.rgb(248, 113, 113)"
+    : "color.rgb(156, 163, 175)";
 
-// Price levels
+  // S/R levels — strip commas, take up to 3 of each
+  const resLevels = (p.keyLevels?.resistance ?? [])
+    .map((r) => parseFloat(cleanPrice(r)))
+    .filter((n) => n > 0)
+    .slice(0, 3);
+  const supLevels = (p.keyLevels?.support ?? [])
+    .map((r) => parseFloat(cleanPrice(r)))
+    .filter((n) => n > 0)
+    .slice(0, 3);
+
+  const srLines = [
+    ...resLevels.map((n, i) => `var line resLine${i + 1} = line.new(bar_index - 100, ${n.toFixed(2)}, bar_index + 200, ${n.toFixed(2)}, extend=extend.right, color=color.rgb(74,222,128,80), style=line.style_dashed, width=1)`),
+    ...supLevels.map((n, i) => `var line supLine${i + 1} = line.new(bar_index - 100, ${n.toFixed(2)}, bar_index + 200, ${n.toFixed(2)}, extend=extend.right, color=color.rgb(248,113,113,80), style=line.style_dashed, width=1)`),
+    ...resLevels.map((n, i) => `var label resLbl${i + 1}  = label.new(bar_index + 10, ${n.toFixed(2)}, "R${i + 1}  ${n.toFixed(2)}", xloc=xloc.bar_index, color=color.rgb(74,222,128,12), textcolor=color.rgb(74,222,128), style=label.style_label_left, size=size.tiny)`),
+    ...supLevels.map((n, i) => `var label supLbl${i + 1}  = label.new(bar_index + 10, ${n.toFixed(2)}, "S${i + 1}  ${n.toFixed(2)}", xloc=xloc.bar_index, color=color.rgb(248,113,113,12), textcolor=color.rgb(248,113,113), style=label.style_label_left, size=size.tiny)`),
+  ].join("\n");
+
+  const tableRows = [
+    `    table.cell(infoTable, 0, 1, "ASSET",      text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 1, "${asset}${tf}", text_color=color.white, text_size=size.tiny)`,
+    `    table.cell(infoTable, 0, 2, "SIGNAL",     text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 2, "${dir}",      text_color=${sigColor}, text_size=size.small)`,
+    `    table.cell(infoTable, 0, 3, "CONFIDENCE", text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 3, "${conf}%  ·  Grade: ${grade}", text_color=color.white, text_size=size.tiny)`,
+    `    table.cell(infoTable, 0, 4, "ENTRY",      text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 4, "${E}",        text_color=color.white, text_size=size.tiny)`,
+    `    table.cell(infoTable, 0, 5, "STOP LOSS",  text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 5, "${SL}",       text_color=color.rgb(248,113,113), text_size=size.tiny)`,
+    `    table.cell(infoTable, 0, 6, "TP1",        text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 6, "${T1}",       text_color=color.rgb(0,230,118), text_size=size.tiny)`,
+    `    table.cell(infoTable, 0, 7, "TP2",        text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 7, "${T2}",       text_color=color.rgb(0,180,90), text_size=size.tiny)`,
+    `    table.cell(infoTable, 0, 8, "GENERATED",  text_color=color.rgb(107,114,128), text_size=size.tiny)`,
+    `    table.cell(infoTable, 1, 8, "${today}",   text_color=color.rgb(75,85,99), text_size=size.tiny)`,
+  ].join("\n");
+
+  return `//@version=5
+indicator("ChartIQ AI Signal", overlay=true, max_lines_count=30, max_labels_count=30)
+// ChartIQ AI — ${asset}${tf} | ${dir} | ${conf}% | Grade: ${grade} | ${today}
+// Generated by ChartIQ AI
+
+// ── Price levels ──────────────────────────────────────────────
 var float entry_price = ${E}
 var float sl_price    = ${SL}
 var float tp1_price   = ${T1}
@@ -67,33 +107,38 @@ var string signal_dir = "${dir}"
 var int confidence    = ${conf}
 var string grade      = "${grade}"
 
-// Colours
+// ── Colours ───────────────────────────────────────────────────
 var color entryCol = color.rgb(255, 255, 255)
-var color slCol    = color.rgb(255, 68, 68)
+var color slCol    = color.rgb(248, 113, 113)
 var color tp1Col   = color.rgb(0, 230, 118)
 var color tp2Col   = color.rgb(0, 180, 90)
 
-// Entry zone background between entry and SL
+// Entry zone background
 bgcolor(close >= math.min(entry_price, sl_price) and close <= math.max(entry_price, sl_price) ? color.rgb(0, 230, 118, 92) : na, title="Entry Zone")
 
-// Horizontal lines
+// ── Level lines ───────────────────────────────────────────────
 var line entryLine = line.new(bar_index - 100, entry_price, bar_index + 200, entry_price, extend=extend.right, color=entryCol, style=line.style_solid,  width=3)
 var line slLine    = line.new(bar_index - 100, sl_price,    bar_index + 200, sl_price,    extend=extend.right, color=slCol,    style=line.style_dashed, width=2)
 var line tp1Line   = line.new(bar_index - 100, tp1_price,   bar_index + 200, tp1_price,   extend=extend.right, color=tp1Col,   style=line.style_dashed, width=2)
 var line tp2Line   = line.new(bar_index - 100, tp2_price,   bar_index + 200, tp2_price,   extend=extend.right, color=tp2Col,   style=line.style_dotted, width=2)
 
-// Labels
-var label entryLabel  = label.new(bar_index + 10, entry_price, "● ENTRY  "     + str.tostring(entry_price, "#.##"), xloc=xloc.bar_index, color=color.rgb(255, 255, 255, 10), textcolor=color.black, style=label.style_label_left, size=size.normal)
-var label slLabel     = label.new(bar_index + 10, sl_price,    "● STOP LOSS  " + str.tostring(sl_price,    "#.##"), xloc=xloc.bar_index, color=color.rgb(255, 68,  68,  10), textcolor=color.white, style=label.style_label_left, size=size.normal)
-var label tp1Label    = label.new(bar_index + 10, tp1_price,   "● TP1  "        + str.tostring(tp1_price,  "#.##"), xloc=xloc.bar_index, color=color.rgb(0,   230, 118, 10), textcolor=color.black, style=label.style_label_left, size=size.normal)
-var label tp2Label    = label.new(bar_index + 10, tp2_price,   "● TP2  "        + str.tostring(tp2_price,  "#.##"), xloc=xloc.bar_index, color=color.rgb(0,   180, 90,  10), textcolor=color.black, style=label.style_label_left, size=size.normal)
-var label signalLabel = label.new(bar_index + 10, tp1_price + (tp1_price - entry_price) * 0.5, "ChartIQ AI  |  " + signal_dir + "  |  " + str.tostring(confidence) + "% confidence  |  Grade: " + grade, xloc=xloc.bar_index, color=color.rgb(0, 230, 118, 10), textcolor=color.white, style=label.style_label_left, size=size.small)
+// ── Labels ────────────────────────────────────────────────────
+var label entryLbl = label.new(bar_index + 10, entry_price, "● ENTRY  "     + str.tostring(entry_price, "#.##"), xloc=xloc.bar_index, color=color.rgb(255,255,255,10), textcolor=color.black, style=label.style_label_left, size=size.normal)
+var label slLbl    = label.new(bar_index + 10, sl_price,    "● STOP LOSS  " + str.tostring(sl_price,    "#.##"), xloc=xloc.bar_index, color=color.rgb(248,113,113,10), textcolor=color.white, style=label.style_label_left, size=size.normal)
+var label tp1Lbl   = label.new(bar_index + 10, tp1_price,   "● TP1  "        + str.tostring(tp1_price,  "#.##"), xloc=xloc.bar_index, color=color.rgb(0,230,118,10),   textcolor=color.black, style=label.style_label_left, size=size.normal)
+var label tp2Lbl   = label.new(bar_index + 10, tp2_price,   "● TP2  "        + str.tostring(tp2_price,  "#.##"), xloc=xloc.bar_index, color=color.rgb(0,180,90,10),    textcolor=color.black, style=label.style_label_left, size=size.normal)
+${srLines ? "\n// ── Key S/R levels ───────────────────────────────────────────\n" + srLines : ""}
+
+// ── Signal info table (top-right) ─────────────────────────────
+var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.rgb(9,13,18,5), border_color=color.rgb(0,230,118,20), border_width=1, frame_color=color.rgb(0,230,118,15), frame_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "ChartIQ AI", bgcolor=color.rgb(0,230,118,85), text_color=color.rgb(9,13,18), text_size=size.small, text_halign=text.align_center)
+    table.cell(infoTable, 1, 0, "",           bgcolor=color.rgb(0,230,118,85))
+    table.merge_cells(infoTable, 0, 0, 1, 0)
+${tableRows}
 `;
 }
-
-// ── Test output (verifies no commas survive) ─────────────
-// generatePineScript({ entry:"27,618.25", stopLoss:"27560.00", takeProfit1:"27750.00", takeProfit2:"27850.00", isPro:true })
-// → entry_price = 27618.25 ✓  sl_price = 27560.00 ✓  tp1_price = 27750.00 ✓  tp2_price = 27850.00 ✓
 
 export default function PineScriptExport(props: Props) {
   const [open,   setOpen]   = useState(false);
@@ -109,11 +154,9 @@ export default function PineScriptExport(props: Props) {
 
   if (!props.isPro) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.7, duration: 0.4 }}
-        className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4"
-      >
+        className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -131,19 +174,12 @@ export default function PineScriptExport(props: Props) {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 1.7, duration: 0.4 }}
       className="rounded-2xl border overflow-hidden"
-      style={{
-        borderColor: open ? "rgba(0,230,118,0.22)" : "rgba(255,255,255,0.07)",
-        background: "#090d12",
-      }}
-    >
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-white/[0.02] transition-colors"
-      >
+      style={{ borderColor: open ? "rgba(0,230,118,0.22)" : "rgba(255,255,255,0.07)", background: "#090d12" }}>
+      <button onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-white/[0.02] transition-colors">
         <div className="flex items-center gap-2.5">
           <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
             <path d="M2 3.5h11M2 7.5h7M2 11.5h9" stroke="#00e676" strokeWidth="1.35" strokeLinecap="round"/>
@@ -162,29 +198,43 @@ export default function PineScriptExport(props: Props) {
 
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="overflow-hidden"
-          >
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="overflow-hidden">
             <div className="px-4 pb-4 space-y-3 border-t border-white/[0.05]">
+
+              {/* S/R level info */}
+              {((props.keyLevels?.resistance?.length ?? 0) > 0 || (props.keyLevels?.support?.length ?? 0) > 0) && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {props.keyLevels?.resistance?.slice(0, 3).map((r, i) => (
+                    <span key={`r${i}`} className="font-dm-mono text-[10px] px-2 py-0.5 rounded-full"
+                      style={{ background: "rgba(74,222,128,0.08)", color: "#4ade80", border: "1px solid rgba(74,222,128,0.2)" }}>
+                      R{i + 1} {r}
+                    </span>
+                  ))}
+                  {props.keyLevels?.support?.slice(0, 3).map((s, i) => (
+                    <span key={`s${i}`} className="font-dm-mono text-[10px] px-2 py-0.5 rounded-full"
+                      style={{ background: "rgba(248,113,113,0.08)", color: "#f87171", border: "1px solid rgba(248,113,113,0.2)" }}>
+                      S{i + 1} {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <div className="relative rounded-xl overflow-hidden mt-3"
                 style={{ background: "#06080f", border: "1px solid rgba(255,255,255,0.06)" }}>
                 <pre className="text-[10.5px] font-dm-mono text-[#7c93b0] p-4 overflow-x-auto leading-[1.65]"
-                  style={{ maxHeight: "260px" }}>
+                  style={{ maxHeight: "280px" }}>
                   {script}
                 </pre>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={handleCopy}
+                <button onClick={handleCopy}
                   className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all hover:-translate-y-0.5"
                   style={copied
                     ? { background: "rgba(0,230,118,0.12)", color: "#00e676", border: "1px solid rgba(0,230,118,0.3)" }
-                    : { background: "#00e676", color: "#080a10" }}
-                >
+                    : { background: "#00e676", color: "#080a10" }}>
                   {copied ? (
                     <><svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2 2.5L9 2.5" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>Copied!</>
                   ) : (
@@ -203,7 +253,7 @@ export default function PineScriptExport(props: Props) {
 
               <div className="rounded-xl px-3 py-2 font-dm-mono text-[10px] text-[#6b7280]"
                 style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-                Pine Script Editor → New → Paste → Add to chart
+                Pine Script Editor → New → Paste → Add to chart · Includes S/R levels + signal info table
               </div>
             </div>
           </motion.div>

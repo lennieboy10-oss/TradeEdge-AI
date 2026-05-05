@@ -13,6 +13,7 @@ export type CalEvent = {
   impact: "High" | "Medium" | "Low";
   forecast: string;
   previous: string;
+  actual: string;
 };
 
 // Server-level cache — lives as long as the Node process
@@ -44,6 +45,7 @@ export async function GET() {
       impact:   normalizeImpact(e.impact ?? ""),
       forecast: String(e.forecast ?? "").trim(),
       previous: String(e.previous ?? "").trim(),
+      actual:   String(e.actual   ?? "").trim(),
     }));
     _cache = { events, ts: now };
     return NextResponse.json({ events });

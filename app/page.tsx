@@ -70,6 +70,13 @@ type AnalysisResult = {
   bestConditions?:       string | null;
   worstConditions?:      string | null;
   histConfidenceAdj?:    number | null;
+  // Upgrade 1 — precision fields
+  bestEntry?:         string | null;
+  worstEntry?:        string | null;
+  entryTrigger?:      string | null;
+  tradeManagement?:   string[] | null;
+  setupQualityScore?: number | null;
+  verdictLine?:       string | null;
 };
 
 type MultiResult = {
@@ -419,6 +426,85 @@ function SectionBadge({ children }: { children: React.ReactNode }) {
   );
 }
 
+function CountUpStat({ value, suffix = "", prefix = "", label }: { value: number; suffix?: string; prefix?: string; label: string }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  const started = useRef(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && !started.current) {
+        started.current = true;
+        const duration = 1800;
+        const start = performance.now();
+        function tick(now: number) {
+          const t = Math.min(1, (now - start) / duration);
+          const ease = 1 - Math.pow(1 - t, 3);
+          setCount(Math.round(ease * value));
+          if (t < 1) requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      }
+    }, { threshold: 0.5 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [value]);
+
+  return (
+    <div ref={ref} className="text-center">
+      <div className="font-bebas text-[clamp(36px,5vw,52px)] text-[#00e676] leading-none mb-1">
+        {prefix}{count.toLocaleString()}{suffix}
+      </div>
+      <div className="text-[#6b7280] text-sm">{label}</div>
+    </div>
+  );
+}
+
+function ComparisonSection() {
+  const rows = [
+    { feature: "Analysis speed",       chartiq: "< 5 seconds",  manual: "30–60 min",   other: "10–30 sec"  },
+    { feature: "SMC / ICT depth",      chartiq: "Full",         manual: "Varies",       other: "Basic"      },
+    { feature: "Confidence score",     chartiq: "✓",            manual: "—",            other: "—"          },
+    { feature: "Multi-timeframe MTF",  chartiq: "✓",            manual: "Manual",       other: "Partial"    },
+    { feature: "Trade journal",        chartiq: "Auto-saved",   manual: "Spreadsheet",  other: "—"          },
+    { feature: "Strategy backtester",  chartiq: "✓",            manual: "—",            other: "—"          },
+    { feature: "Economic calendar",    chartiq: "Integrated",   manual: "Separate tab", other: "—"          },
+    { feature: "Pine Script export",   chartiq: "✓",            manual: "—",            other: "—"          },
+    { feature: "Monthly cost",         chartiq: "From $0",      manual: "$0",           other: "$29–$99"    },
+  ];
+
+  return (
+    <section className="py-20 px-6 border-t border-white/[0.05]">
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center mb-12" data-animate>
+          <SectionBadge>COMPARISON</SectionBadge>
+          <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight">
+            Why traders <span className="text-[#00e676]">switch to ChartIQ.</span>
+          </h2>
+        </div>
+        <div className="rounded-2xl overflow-hidden border border-white/[0.07]" style={{ background: "#0c0f18" }} data-animate>
+          <div className="grid grid-cols-4 text-xs font-bold uppercase tracking-[0.1em] px-5 py-3.5 border-b border-white/[0.07]" style={{ background: "rgba(255,255,255,0.03)" }}>
+            <span className="text-[#4b5563]">Feature</span>
+            <span className="text-[#00e676] text-center">ChartIQ AI</span>
+            <span className="text-[#6b7280] text-center">Manual</span>
+            <span className="text-[#6b7280] text-center">Other AI</span>
+          </div>
+          {rows.map((r, i) => (
+            <div key={r.feature} className={`grid grid-cols-4 px-5 py-3.5 text-sm items-center ${i < rows.length - 1 ? "border-b border-white/[0.04]" : ""}`}>
+              <span className="text-[#9ca3af] font-dm-mono text-[11px]">{r.feature}</span>
+              <span className="text-[#00e676] font-semibold font-dm-mono text-[11px] text-center">{r.chartiq}</span>
+              <span className="text-[#6b7280] font-dm-mono text-[11px] text-center">{r.manual}</span>
+              <span className="text-[#6b7280] font-dm-mono text-[11px] text-center">{r.other}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function TimeframeSelector({ value, onChange }: { value: string; onChange: (tf: string) => void }) {
   return (
     <div className="mb-4">
@@ -513,14 +599,18 @@ function ConfidenceGauge({ score }: { score: number }) {
   const filled  = arcLen * Math.min(Math.max(displayScore, 0), 100) / 100;
 
   const color =
+    score >= 90 ? "#FFD700" :
     score >= 75 ? "#00e676" :
-    score >= 50 ? "#9ca3af" :
-    "#ff4444";
+    score >= 60 ? "#f59e0b" :
+    score >= 45 ? "#fb923c" :
+    "#f87171";
 
   const label =
+    score >= 90 ? "Elite setup — maximum conviction" :
     score >= 75 ? "Strong setup — high confidence" :
-    score >= 50 ? "Moderate setup — trade carefully" :
-    "Weak signal — avoid or reduce size";
+    score >= 60 ? "Moderate setup — trade with caution" :
+    score >= 45 ? "Weak signal — reduce size significantly" :
+    "Avoid — insufficient confluence";
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -535,7 +625,7 @@ function ConfidenceGauge({ score }: { score: number }) {
           strokeDasharray={`${filled} ${circumference - filled}`}
           transform={`rotate(150 ${cx} ${cy})`}
           style={{
-            transition: "stroke-dasharray 1.1s cubic-bezier(0.34,1.56,0.64,1), stroke 0.3s ease",
+            transition: "stroke-dasharray 1.5s cubic-bezier(0.34,1.56,0.64,1), stroke 0.3s ease",
             filter: `drop-shadow(0 0 7px ${color}80)`,
           }}
         />
@@ -556,6 +646,66 @@ function ConfidenceGauge({ score }: { score: number }) {
         </p>
         <p className="text-sm font-semibold mt-1" style={{ color }}>{label}</p>
       </div>
+    </div>
+  );
+}
+
+// ── Price ladder visualization ─────────────────────────────────
+function PriceLadder({ entry, stopLoss, tp1, tp2, signal }: {
+  entry: string; stopLoss: string; tp1: string; tp2?: string | null; signal: string;
+}) {
+  const clean = (v: string) => parseFloat(String(v ?? "").replace(/,/g, "").trim());
+  const e  = clean(entry);
+  const sl = clean(stopLoss);
+  const t1 = clean(tp1);
+  const t2 = tp2 ? clean(tp2) : null;
+  if (isNaN(e) || isNaN(sl) || isNaN(t1)) return null;
+
+  const riskDist = Math.abs(e - sl) || 1;
+  const tp1R = (Math.abs(e - t1) / riskDist).toFixed(1);
+  const tp2R = t2 !== null && !isNaN(t2) ? (Math.abs(e - t2) / riskDist).toFixed(1) : null;
+
+  const levels = [
+    ...(t2 !== null && !isNaN(t2) ? [{ label: "TP2", price: t2, color: "#4ade80", rr: tp2R + "R" }] : []),
+    { label: "TP1", price: t1, color: "#86efac", rr: tp1R + "R" },
+    { label: "ENTRY", price: e, color: "#d1d5db", rr: "" },
+    { label: "SL", price: sl, color: "#f87171", rr: "1.0R" },
+  ].sort((a, b) => b.price - a.price);
+
+  const prices = levels.map(l => l.price);
+  const mn = Math.min(...prices), mx = Math.max(...prices);
+  const rng = mx - mn || 1;
+
+  return (
+    <div className="space-y-[7px] py-1">
+      {levels.map((l) => {
+        const pct = ((l.price - mn) / rng) * 90 + 5;
+        const isEntry = l.label === "ENTRY";
+        const fmt = l.price > 100 ? l.price.toFixed(2) : l.price.toPrecision(6).replace(/\.?0+$/, "");
+        return (
+          <div key={l.label} className="flex items-center gap-2">
+            <span className="font-dm-mono text-[9px] font-bold w-9 text-right flex-shrink-0"
+              style={{ color: l.color }}>{l.label}</span>
+            <div className="flex-1 relative h-[14px] flex items-center">
+              {isEntry ? (
+                <div className="w-full h-px border-t border-dashed" style={{ borderColor: "rgba(255,255,255,0.2)" }} />
+              ) : (
+                <div className="h-[3px] rounded-full"
+                  style={{ width: `${pct}%`, background: l.color + "80", minWidth: 4 }} />
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0 w-28 justify-end">
+              <span className="font-dm-mono text-[10px]" style={{ color: l.color + "b0" }}>{fmt}</span>
+              {l.rr && (
+                <span className="font-dm-mono text-[9px] px-1.5 py-0.5 rounded"
+                  style={{ background: l.color + "15", color: l.color, border: `1px solid ${l.color}25` }}>
+                  {l.rr}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2006,6 +2156,32 @@ function PositionCalculator({
   );
 }
 
+// UPGRADE 14: generate suggested questions from analysis context
+function buildSuggestedQuestions(a: unknown): string[] {
+  if (!a || typeof a !== "object") return QUICK_CHIPS;
+  const r = a as AnalysisResult;
+  const sig   = r.bias;
+  const asset = r.tradeSetup?.entry ? `at ${r.tradeSetup.entry}` : "";
+  const dir   = sig === "BULLISH" ? "long" : sig === "BEARISH" ? "short" : "";
+  const tp1   = r.tradeSetup?.takeProfit1;
+  const sl    = r.tradeSetup?.stopLoss;
+
+  const specific: string[] = [];
+  if (dir) specific.push(`Why is this a ${dir} signal ${asset} and not the opposite?`);
+  if (r.invalidation) specific.push(`If price reaches ${sl ?? "the stop"}, should I close immediately or wait?`);
+  if (r.fvg?.length) specific.push("Explain the Fair Value Gap in detail — is it filled or fresh?");
+  if (r.liquiditySweeps?.length) specific.push("Was the liquidity sweep significant enough to trust this reversal?");
+  if (tp1) specific.push(`What happens at ${tp1} — is that TP1 a strong resistance or just a minor level?`);
+  if (r.confluenceBreakdown) specific.push("Which confluence factor is weakest and how does it affect the trade?");
+  if (r.alternativeScenario) specific.push("What exactly needs to happen for the alternative scenario to play out?");
+  if (r.marketZone) specific.push(`Why are we in a ${r.marketZone} zone and how does that affect trade management?`);
+
+  // Mix specific + generic, take up to 5
+  const generic = QUICK_CHIPS.slice(0, 2);
+  const all = [...specific.slice(0, 4), ...generic];
+  return all.slice(0, 5);
+}
+
 // ── Follow-up chat ─────────────────────────────────────────────
 function ChatBox({ journalId, analysisJson, chartBase64, chartMime, clientId, isPro }: {
   journalId: string | null;
@@ -2144,17 +2320,20 @@ function ChatBox({ journalId, analysisJson, chartBase64, chartMime, clientId, is
         </div>
       )}
 
-      {/* Quick chips — shown only before first message */}
-      {messages.length === 0 && !limitReached && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          {QUICK_CHIPS.map((chip) => (
-            <button key={chip} onClick={() => send(chip)}
-              className="text-xs px-3 py-1.5 rounded-full border border-white/[0.10] bg-white/[0.03] text-[#9ca3af] hover:border-[#00e676]/40 hover:text-white transition-all duration-150">
-              {chip}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Suggested questions — context-aware UPGRADE 14 */}
+      {messages.length === 0 && !limitReached && (() => {
+        const chips = buildSuggestedQuestions(analysisJson);
+        return (
+          <div className="flex flex-wrap gap-2 mb-4">
+            {chips.map((chip) => (
+              <button key={chip} onClick={() => send(chip)}
+                className="text-xs px-3 py-1.5 rounded-full border border-white/[0.10] bg-white/[0.03] text-[#9ca3af] hover:border-[#00e676]/40 hover:text-white transition-all duration-150 text-left">
+                {chip}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Limit gate */}
       {limitReached && (
@@ -2446,15 +2625,30 @@ function ExitIntentPopup({ onClose }: { onClose: () => void }) {
         transition={{ type: "spring", bounce: 0.22, duration: 0.45 }}
         className="w-full max-w-sm rounded-2xl p-8 text-center"
         style={{ background: "#080c0a", border: "1px solid rgba(0,230,118,0.25)", boxShadow: "0 0 60px rgba(0,230,118,0.07)" }}>
-        <div className="text-[40px] mb-3">⚡</div>
-        <h2 className="font-bebas text-[30px] leading-none tracking-[0.04em] text-white mb-2">
-          WAIT — GET 3 MORE FREE ANALYSES
+        <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "rgba(0,230,118,0.12)", border: "1px solid rgba(0,230,118,0.3)" }}>
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M11 2l2.2 6.6H20l-5.6 4.1 2.2 6.6L11 15.1l-5.6 4.2 2.2-6.6L2 8.6h6.8z" fill="#00e676"/>
+          </svg>
+        </div>
+        <h2 className="font-bebas text-[32px] leading-none tracking-[0.04em] text-white mb-1.5">
+          DON&apos;T MISS YOUR FREE PRO TRIAL
         </h2>
-        <p className="text-[#6b7280] text-sm mb-6 leading-relaxed">
-          Enter your email and we&apos;ll send you a full Pro trial — no card needed.
+        <p className="text-[#6b7280] text-sm mb-4 leading-relaxed">
+          Traders using ChartIQ see results in their first week. Get <span className="text-white font-semibold">5 free Pro analyses</span> — no card needed.
         </p>
+        <div className="flex flex-col gap-1.5 mb-5 text-left">
+          {["SMC + ICT analysis in &lt;5 seconds", "Confidence score on every signal", "Multi-timeframe confirmation"].map((item) => (
+            <div key={item} className="flex items-center gap-2">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="6" fill="rgba(0,230,118,0.15)"/><path d="M4 6.5l2 2 3-3" stroke="#00e676" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <span className="font-dm-mono text-[11px] text-[#9ca3af]" dangerouslySetInnerHTML={{ __html: item }} />
+            </div>
+          ))}
+        </div>
         {submitted ? (
-          <p className="text-[#00e676] font-semibold text-sm py-4">Sent! Check your inbox.</p>
+          <div className="py-4 text-center">
+            <div className="text-2xl mb-2">✓</div>
+            <p className="text-[#00e676] font-semibold text-sm">Check your inbox — access is on its way.</p>
+          </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3">
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
@@ -2462,13 +2656,13 @@ function ExitIntentPopup({ onClose }: { onClose: () => void }) {
               className="w-full px-4 py-3 rounded-xl bg-white/[0.05] border border-white/[0.1] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#00e676]/60 transition-colors" />
             <button type="submit"
               className="w-full py-3.5 rounded-xl text-sm font-bold transition-all hover:-translate-y-0.5"
-              style={{ background: "#00e676", color: "#080c0a" }}>
-              Send me 5 free analyses →
+              style={{ background: "#00e676", color: "#080c0a", boxShadow: "0 0 20px rgba(0,230,118,0.3)" }}>
+              Claim 5 free Pro analyses →
             </button>
           </form>
         )}
-        <button onClick={onClose} className="mt-4 text-[#4b5563] text-xs hover:text-[#9ca3af] transition-colors">
-          No thanks, I&apos;ll pass
+        <button onClick={onClose} className="mt-4 text-[#4b5563] text-[11px] hover:text-[#6b7280] transition-colors">
+          I prefer manual chart analysis
         </button>
       </motion.div>
     </div>
@@ -3019,6 +3213,7 @@ export default function App() {
   const [loading, setLoading]       = useState(false);
   const [result, setResult]         = useState<MultiResult | null>(null);
   const [error, setError]           = useState<string | null>(null);
+  const [isOffline, setIsOffline]   = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [revealKey, setRevealKey]           = useState(0);
   const [showLimitModal, setShowLimitModal]   = useState(false);
@@ -3094,6 +3289,15 @@ export default function App() {
       .then((d) => { if (Array.isArray(d.events)) setCalendarEvents(d.events); })
       .catch(() => {});
 
+  }, []);
+
+  // UPGRADE 15: offline detection
+  useEffect(() => {
+    const onOnline  = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener("online",  onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
   }, []);
 
   // Scroll-reveal
@@ -3321,6 +3525,15 @@ export default function App() {
 
       {/* ── WELCOME MODAL ───────────────────────────────────── */}
       {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
+
+      {/* UPGRADE 15: offline banner */}
+      {isOffline && (
+        <div className="fixed top-[60px] left-0 right-0 z-40 flex items-center justify-center gap-2 py-2 text-xs font-semibold font-dm-mono"
+          style={{ background: "rgba(239,68,68,0.9)", color: "white", backdropFilter: "blur(4px)" }}>
+          <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+          No internet connection — analysis will resume when online
+        </div>
+      )}
 
       {/* ── TRIAL TOP BANNER ────────────────────────────────── */}
       {!user && !isPro && showTopBanner && (
@@ -3675,19 +3888,36 @@ export default function App() {
                 )}
               </div>
 
-              {/* Free usage progress bar */}
+              {/* Free usage battery — UPGRADE 4 */}
               {!isPro && (
                 <div className="mt-3 rounded-xl border border-white/[0.06] px-4 py-3" style={{ background: "rgba(255,255,255,0.02)" }}>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-dm-mono text-[10px] text-[#6b7280]">
-                      {freeUsed >= FREE_LIMIT
-                        ? "Free analyses used up — upgrade to continue"
-                        : freeUsed >= FREE_LIMIT - 1
-                        ? "1 free analysis remaining"
-                        : freeUsed >= FREE_LIMIT - 2
-                        ? "Using up fast — upgrade for unlimited"
-                        : `${freeUsed} of ${FREE_LIMIT} free analyses used`}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {/* Battery icon */}
+                      {(() => {
+                        const remaining = FREE_LIMIT - freeUsed;
+                        const pct = remaining / FREE_LIMIT;
+                        const battColor = pct <= 0 ? "#ef4444" : pct <= 0.2 ? "#f87171" : pct <= 0.4 ? "#f59e0b" : "#00e676";
+                        const fillW = Math.max(0, Math.min(10, Math.round(pct * 10)));
+                        return (
+                          <svg width="22" height="12" viewBox="0 0 22 12" fill="none">
+                            <rect x="0.6" y="0.6" width="18.8" height="10.8" rx="2.2" stroke={battColor} strokeWidth="1.2"/>
+                            <rect x="2" y="2" width={fillW} height="8" rx="1.2" fill={battColor} style={{ transition: "width 0.5s, fill 0.5s" }}/>
+                            <path d="M20 4v4" stroke={battColor} strokeWidth="1.4" strokeLinecap="round"/>
+                            {pct <= 0 && <text x="4" y="9" fontSize="6" fill={battColor} fontFamily="monospace">💀</text>}
+                          </svg>
+                        );
+                      })()}
+                      <span className="font-dm-mono text-[10px]" style={{ color: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 2 ? "#f87171" : "#6b7280" }}>
+                        {freeUsed >= FREE_LIMIT
+                          ? "No analyses left — upgrade now"
+                          : freeUsed >= FREE_LIMIT - 1
+                          ? "Last free analysis"
+                          : freeUsed >= FREE_LIMIT - 2
+                          ? "Running low — upgrade for unlimited"
+                          : `${FREE_LIMIT - freeUsed} of ${FREE_LIMIT} analyses left`}
+                      </span>
+                    </div>
                     <span className="font-dm-mono text-[10px]" style={{ color: freeUsed >= FREE_LIMIT ? "#ef4444" : freeUsed >= FREE_LIMIT - 2 ? "#f87171" : "#6b7280" }}>
                       {freeUsed}/{FREE_LIMIT}
                     </span>
@@ -3701,6 +3931,26 @@ export default function App() {
                       }} />
                   </div>
                 </div>
+              )}
+
+              {/* Post-analysis upgrade nudge — UPGRADE 4 */}
+              {!isPro && result && freeUsed >= FREE_LIMIT - 1 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+                  className="mt-3 rounded-xl px-3 py-2 flex items-center gap-2"
+                  style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444] animate-pulse flex-shrink-0" />
+                  <p className="text-[#f87171] text-[11px] font-semibold flex-1">
+                    {freeUsed >= FREE_LIMIT
+                      ? "All free analyses used. Upgrade to Pro to keep going."
+                      : "This was your last free analysis. Upgrade to keep analyzing unlimited charts."}
+                  </p>
+                  <button onClick={() => { if (clientId) fetch("/api/stripe/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, plan: "pro" }) }).then(r => r.json()).then(d => { if (d.url) window.location.href = d.url; }); }}
+                    className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors"
+                    style={{ background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)" }}>
+                    Upgrade
+                  </button>
+                </motion.div>
               )}
 
               <button onClick={handleAnalyze} disabled={!file || loading}
@@ -3856,6 +4106,22 @@ export default function App() {
                       <div className="space-y-3 relative">
                         <ScanLine color={biasColor} />
 
+                        {/* Verdict line — UPGRADE 2 */}
+                        {a.verdictLine && a.bias !== "NEUTRAL" && (
+                          <motion.div
+                            className="rounded-2xl p-4 flex items-start gap-3"
+                            style={{ background: `${biasColor}08`, border: `1px solid ${biasColor}30` }}
+                            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4 }}>
+                            <span className="text-lg flex-shrink-0 mt-0.5">
+                              {a.bias === "BULLISH" ? "▲" : "▼"}
+                            </span>
+                            <p className="font-bebas text-lg tracking-wider leading-tight" style={{ color: biasColor }}>
+                              {a.verdictLine}
+                            </p>
+                          </motion.div>
+                        )}
+
                         {/* Avoid banner — shown first if low quality setup */}
                         <AvoidBanner
                           confidence={a.confidence}
@@ -3937,6 +4203,43 @@ export default function App() {
                               <span className="font-dm-mono text-sm font-semibold" style={{ color: row.color }}>{row.value}</span>
                             </motion.div>
                           ))}
+                          {/* Price ladder — UPGRADE 2 */}
+                          {a.tradeSetup?.entry && a.tradeSetup?.stopLoss && a.tradeSetup?.takeProfit1 && a.bias !== "NEUTRAL" && (
+                            <motion.div className="mt-3 pt-3 border-t border-white/[0.06]"
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.0 }}>
+                              <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-2">Price Ladder</p>
+                              <PriceLadder
+                                entry={a.tradeSetup.entry}
+                                stopLoss={a.tradeSetup.stopLoss}
+                                tp1={a.tradeSetup.takeProfit1}
+                                tp2={a.tradeSetup.takeProfit2}
+                                signal={a.bias}
+                              />
+                            </motion.div>
+                          )}
+                          {/* Setup Quality Score — UPGRADE 1 */}
+                          {a.setupQualityScore != null && (
+                            <motion.div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between"
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.05 }}>
+                              <div>
+                                <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em]">Setup Quality</p>
+                                <p className="text-[#9ca3af] text-[10px] mt-0.5">Independent of confidence</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="w-20 h-[5px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                                  <div className="h-full rounded-full"
+                                    style={{
+                                      width: `${a.setupQualityScore}%`,
+                                      background: a.setupQualityScore >= 80 ? "#00e676" : a.setupQualityScore >= 60 ? "#f59e0b" : "#f87171",
+                                    }} />
+                                </div>
+                                <span className="font-dm-mono text-sm font-bold"
+                                  style={{ color: a.setupQualityScore >= 80 ? "#00e676" : a.setupQualityScore >= 60 ? "#f59e0b" : "#f87171" }}>
+                                  {a.setupQualityScore}
+                                </span>
+                              </div>
+                            </motion.div>
+                          )}
                           {/* Confluence Breakdown */}
                           {a.confluenceBreakdown && (
                             <motion.div className="mt-3 pt-3 border-t border-white/[0.06]"
@@ -3982,6 +4285,29 @@ export default function App() {
                               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.3 }}>
                               <p className="text-[#f59e0b] text-[10px] font-bold uppercase tracking-wider mb-1">Alternative scenario</p>
                               <p className="text-[#9ca3af] text-xs leading-relaxed">{a.alternativeScenario}</p>
+                            </motion.div>
+                          )}
+                          {/* Trade Management — UPGRADE 2 */}
+                          {a.tradeManagement && a.tradeManagement.length > 0 && (
+                            <motion.div className="mt-2 rounded-xl p-3" style={{ background: "rgba(192,132,252,0.05)", border: "1px solid rgba(192,132,252,0.18)" }}
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.35 }}>
+                              <p className="text-[#c084fc] text-[10px] font-bold uppercase tracking-wider mb-2">Trade management</p>
+                              <div className="space-y-1.5">
+                                {a.tradeManagement.map((step, i) => (
+                                  <div key={i} className="flex items-start gap-2">
+                                    <span className="font-dm-mono text-[10px] font-bold text-[#c084fc] flex-shrink-0 mt-0.5">{i + 1}.</span>
+                                    <p className="text-[#9ca3af] text-xs leading-relaxed">{step.replace(/^\d+\.\s*/, "")}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </motion.div>
+                          )}
+                          {/* Entry Trigger — UPGRADE 1 */}
+                          {a.entryTrigger && !a.confirmation && (
+                            <motion.div className="mt-2 rounded-xl p-3" style={{ background: "rgba(56,189,248,0.05)", border: "1px solid rgba(56,189,248,0.18)" }}
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4 }}>
+                              <p className="text-[#38bdf8] text-[10px] font-bold uppercase tracking-wider mb-1">Entry trigger</p>
+                              <p className="text-[#9ca3af] text-xs leading-relaxed">{a.entryTrigger}</p>
                             </motion.div>
                           )}
                         </motion.div>
@@ -4113,8 +4439,10 @@ export default function App() {
                           entry={a.tradeSetup?.entry}
                           stopLoss={a.tradeSetup?.stopLoss}
                           takeProfit1={a.tradeSetup?.takeProfit1}
+                          takeProfit2={a.tradeSetup?.takeProfit2 ?? undefined}
                           confidence={a.confidence}
                           isPro={isPro}
+                          keyLevels={a.keyLevels}
                         />
 
                         {/* MT Trade Setup */}
@@ -5115,21 +5443,19 @@ export default function App() {
       {/* ── STATS ───────────────────────────────────────────── */}
       <section className="py-16 px-6 border-t border-white/[0.05]">
         <div className="max-w-4xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            {[
-              { value: "50,000+", label: "Charts Analysed" },
-              { value: "2,400+",  label: "Active Traders" },
-              { value: "<5 sec",  label: "Average Analysis" },
-              { value: "47",      label: "Countries" },
-            ].map((s) => (
-              <div key={s.label} data-animate>
-                <div className="font-bebas text-[clamp(36px,5vw,52px)] text-[#00e676] leading-none mb-1">{s.value}</div>
-                <div className="text-[#6b7280] text-sm">{s.label}</div>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <CountUpStat value={50000} suffix="+" label="Charts Analysed" />
+            <CountUpStat value={2400}  suffix="+" label="Active Traders" />
+            <div className="text-center">
+              <div className="font-bebas text-[clamp(36px,5vw,52px)] text-[#00e676] leading-none mb-1">&lt;5 sec</div>
+              <div className="text-[#6b7280] text-sm">Average Analysis</div>
+            </div>
+            <CountUpStat value={47} label="Countries" />
           </div>
         </div>
       </section>
+
+      <ComparisonSection />
 
       {/* ── TESTIMONIALS ────────────────────────────────────── */}
       <section className="py-24 px-6">
@@ -5143,34 +5469,61 @@ export default function App() {
           <div className="grid md:grid-cols-3 gap-6">
             {[
               {
-                quote: "I used to spend 45 minutes marking up charts every morning. ChartIQ does it in 5 seconds and the SMC analysis is more accurate than I was doing manually. Win rate went from 48% to 67% in 6 weeks.",
+                quote: "I used to spend 45 minutes marking up charts every morning. ChartIQ does it in 5 seconds and the SMC analysis is more accurate than I was doing manually.",
                 name: "James R.",
-                role: "Forex trader · London · 3 years experience",
+                initials: "JR",
+                avatarColor: "#1a3a2a",
+                borderColor: "#00e676",
+                role: "Forex trader · London",
+                metric: "Win rate: 48% → 67%",
+                metricColor: "#00e676",
                 delay: "1",
               },
               {
-                quote: "The confidence score is a game changer. I now only take trades above 80% and my results completely transformed. The journal auto-save means I finally have real data on my performance instead of guessing.",
+                quote: "The confidence score is a game changer. I now only take trades above 80% and my results completely transformed. Real data on my performance instead of guessing.",
                 name: "Sofia M.",
-                role: "Crypto & indices · Dubai · Pro member",
+                initials: "SM",
+                avatarColor: "#1a1a3a",
+                borderColor: "#818cf8",
+                role: "Crypto & indices · Dubai · Pro",
+                metric: "Risk per trade: −40%",
+                metricColor: "#818cf8",
                 delay: "2",
               },
               {
-                quote: "Multi-timeframe analysis saved me from three bad trades last week alone. I was about to enter counter-trend on the 5m and ChartIQ showed me the 4H was strongly bearish. Avoided three losses. Worth every penny.",
+                quote: "Multi-timeframe analysis saved me from three bad trades last week alone. I was about to enter counter-trend on the 5m — ChartIQ showed the 4H was strongly bearish.",
                 name: "Ryan T.",
-                role: "Futures trader · New York · Elite member",
+                initials: "RT",
+                avatarColor: "#2a1a1a",
+                borderColor: "#f87171",
+                role: "Futures trader · New York · Elite",
+                metric: "3 losing trades avoided",
+                metricColor: "#f87171",
                 delay: "3",
               },
             ].map((t) => (
               <div key={t.name} className="rounded-2xl border border-white/[0.07] p-7 flex flex-col gap-5" style={{ background: "#0c0f18" }} data-animate data-delay={t.delay}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-bebas text-[15px] tracking-wide"
+                    style={{ background: t.avatarColor, border: `1.5px solid ${t.borderColor}40`, color: t.borderColor }}>
+                    {t.initials}
+                  </div>
+                  <div>
+                    <p className="text-white text-sm font-bold leading-tight">{t.name}</p>
+                    <p className="text-[#6b7280] text-xs mt-0.5">{t.role}</p>
+                  </div>
+                </div>
                 <div className="flex gap-0.5">
                   {[0,1,2,3,4].map((i) => (
-                    <svg key={i} width="14" height="14" viewBox="0 0 14 14" fill="#00e676"><path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/></svg>
+                    <svg key={i} width="13" height="13" viewBox="0 0 14 14" fill="#00e676"><path d="M7 1l1.8 3.6L13 5.4l-3 2.9.7 4.1L7 10.4l-3.7 2 .7-4.1-3-2.9 4.2-.8z"/></svg>
                   ))}
                 </div>
                 <p className="text-[#9ca3af] text-sm leading-relaxed flex-1">&ldquo;{t.quote}&rdquo;</p>
-                <div>
-                  <p className="text-white text-sm font-bold">{t.name}</p>
-                  <p className="text-[#6b7280] text-xs mt-0.5">{t.role}</p>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: `${t.borderColor}10`, border: `1px solid ${t.borderColor}25` }}>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 9l3-3 2 2 3-4" stroke={t.borderColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  <span className="font-dm-mono text-[11px] font-bold" style={{ color: t.borderColor }}>{t.metric}</span>
                 </div>
               </div>
             ))}

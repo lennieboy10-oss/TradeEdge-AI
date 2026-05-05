@@ -165,6 +165,49 @@ function buildMonthlyHeatmap(entries: JournalEntry[]) {
     .map(([key, v]) => ({ key, ...v, rate: v.total > 0 ? Math.round((v.wins / v.total) * 100) : null }));
 }
 
+// UPGRADE 5: time of day win rate (UTC hour buckets)
+function buildTimeOfDayData(entries: JournalEntry[]) {
+  const buckets: Record<number, { wins: number; total: number }> = {};
+  entries.filter((e) => e.entry_time_utc && (e.outcome === "WIN" || e.outcome === "LOSS")).forEach((e) => {
+    const h = parseInt((e.entry_time_utc ?? "0:0").split(":")[0], 10);
+    if (isNaN(h)) return;
+    if (!buckets[h]) buckets[h] = { wins: 0, total: 0 };
+    buckets[h].total++;
+    if (e.outcome === "WIN") buckets[h].wins++;
+  });
+  return Array.from({ length: 24 }, (_, h) => ({
+    hour: h, label: `${String(h).padStart(2, "0")}:00`,
+    wins: buckets[h]?.wins ?? 0, total: buckets[h]?.total ?? 0,
+    rate: buckets[h]?.total ? Math.round((buckets[h].wins / buckets[h].total) * 100) : null,
+  }));
+}
+
+// UPGRADE 5: consecutive trade of day analysis
+function buildConsecutiveStats(entries: JournalEntry[]) {
+  // Group by date (YYYY-MM-DD from created_at), sort each group by time
+  const byDate: Record<string, JournalEntry[]> = {};
+  entries.filter((e) => e.outcome === "WIN" || e.outcome === "LOSS").forEach((e) => {
+    const d = e.created_at.split("T")[0];
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(e);
+  });
+  const pos: Record<number, { wins: number; total: number }> = {};
+  for (const trades of Object.values(byDate)) {
+    trades.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    trades.forEach((t, i) => {
+      const p = Math.min(i + 1, 4); // cap at 4+
+      if (!pos[p]) pos[p] = { wins: 0, total: 0 };
+      pos[p].total++;
+      if (t.outcome === "WIN") pos[p].wins++;
+    });
+  }
+  return [1, 2, 3, 4].map((p) => ({
+    label: p < 4 ? `Trade ${p}` : "Trade 4+",
+    wins: pos[p]?.wins ?? 0, total: pos[p]?.total ?? 0,
+    rate: pos[p]?.total ? Math.round((pos[p].wins / pos[p].total) * 100) : null,
+  }));
+}
+
 function buildBreakdown(entries: JournalEntry[], key: keyof JournalEntry) {
   const map: Record<string, { wins: number; total: number }> = {};
   entries.filter((e) => e[key] && (e.outcome === "WIN" || e.outcome === "LOSS")).forEach((e) => {
@@ -391,6 +434,70 @@ function BreakdownSection({ title, data }: { title: string; data: { label: strin
       <div className="divide-y divide-white/[0.04]">
         {data.map((d) => <BreakdownRow key={d.label} {...d} />)}
       </div>
+    </div>
+  );
+}
+
+// ── UPGRADE 5: Time of day heatmap ────────────────────────────
+function TimeOfDayGrid({ data }: { data: ReturnType<typeof buildTimeOfDayData> }) {
+  const active = data.filter((d) => d.total > 0);
+  if (active.length === 0) return (
+    <p className="text-[#374151] text-sm font-dm-mono">No entry_time_utc data available yet</p>
+  );
+  return (
+    <div>
+      <div className="grid grid-cols-8 gap-1">
+        {data.map((d) => {
+          const bg = d.total === 0 ? "rgba(255,255,255,0.03)"
+            : d.rate! >= 70 ? "rgba(0,230,118,0.22)"
+            : d.rate! >= 50 ? "rgba(245,158,11,0.22)"
+            : "rgba(248,113,113,0.22)";
+          const border = d.total === 0 ? "rgba(255,255,255,0.04)"
+            : d.rate! >= 70 ? "rgba(0,230,118,0.35)"
+            : d.rate! >= 50 ? "rgba(245,158,11,0.35)"
+            : "rgba(248,113,113,0.35)";
+          return (
+            <div key={d.hour} className="rounded-lg p-1.5 text-center"
+              style={{ background: bg, border: `1px solid ${border}` }}
+              title={d.total > 0 ? `${d.label}: ${d.wins}W/${d.total - d.wins}L (${d.rate}%)` : d.label}>
+              <p className="font-dm-mono text-[8px] text-[#6b7280]">{String(d.hour).padStart(2, "0")}</p>
+              {d.total > 0 ? (
+                <p className="font-dm-mono text-[9px] font-bold"
+                  style={{ color: d.rate! >= 70 ? "#00e676" : d.rate! >= 50 ? "#f59e0b" : "#f87171" }}>
+                  {d.rate}%
+                </p>
+              ) : (
+                <p className="font-dm-mono text-[8px] text-[#374151]">—</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="font-dm-mono text-[9px] text-[#374151] mt-2">UTC hours · hover for detail</p>
+    </div>
+  );
+}
+
+// ── UPGRADE 5: Consecutive trade stats ────────────────────────
+function ConsecutiveStats({ data }: { data: ReturnType<typeof buildConsecutiveStats> }) {
+  const active = data.filter((d) => d.total > 0);
+  if (active.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {data.filter((d) => d.total > 0).map((d) => (
+        <div key={d.label} className="flex items-center gap-2">
+          <span className="font-dm-mono text-[10px] text-[#6b7280] w-16 flex-shrink-0">{d.label}</span>
+          <div className="flex-1 h-[5px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+            <div className="h-full rounded-full"
+              style={{ width: `${d.rate}%`, background: d.rate! >= 60 ? "#00e676" : d.rate! >= 40 ? "#f59e0b" : "#f87171" }} />
+          </div>
+          <span className="font-dm-mono text-[10px] font-bold w-10 text-right"
+            style={{ color: d.rate! >= 60 ? "#00e676" : d.rate! >= 40 ? "#f59e0b" : "#f87171" }}>
+            {d.rate}%
+          </span>
+          <span className="font-dm-mono text-[9px] text-[#374151] w-12 text-right">{d.wins}W/{d.total - d.wins}L</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -644,6 +751,31 @@ function ManualTradeModal({ clientId, onClose, onSaved }: {
 }
 
 // ── Trade card ────────────────────────────────────────────────
+const MISTAKE_TYPES = [
+  "FOMO — chased the move",
+  "Early entry — no confirmation",
+  "Ignored invalidation — moved SL",
+  "Overtraded — too many positions",
+  "Revenge trade — after a loss",
+  "Wrong timeframe bias",
+  "News event ignored",
+  "Setup didn't meet rules",
+  "Sized too large",
+  "Other",
+];
+
+function parseMistakeType(reviewNotes: string | null | undefined): { type: string; lessons: string } {
+  if (!reviewNotes) return { type: "", lessons: "" };
+  const m = reviewNotes.match(/^\[MISTAKE:(.*?)\]\s*([\s\S]*)$/);
+  if (m) return { type: m[1].trim(), lessons: m[2].trim() };
+  return { type: "", lessons: reviewNotes };
+}
+
+function encodeMistakeNotes(type: string, lessons: string): string {
+  if (!type) return lessons;
+  return `[MISTAKE:${type}] ${lessons}`;
+}
+
 function TradeCard({ entry, onUpdate, onDelete }: {
   entry: JournalEntry;
   onUpdate: (id: string, patch: Partial<JournalEntry>) => void;
@@ -654,6 +786,9 @@ function TradeCard({ entry, onUpdate, onDelete }: {
   const [pnl,      setPnl]      = useState(entry.pnl != null ? String(entry.pnl) : "");
   const [rAch,     setRAch]     = useState(entry.r_achieved != null ? String(entry.r_achieved) : "");
   const [deleting, setDeleting] = useState(false);
+  const parsed = parseMistakeType(entry.review_notes);
+  const [mistakeType, setMistakeType] = useState(parsed.type);
+  const [lessons,     setLessons]     = useState(parsed.lessons);
 
   async function patch(body: Partial<JournalEntry>) {
     onUpdate(entry.id, body);
@@ -881,6 +1016,57 @@ function TradeCard({ entry, onUpdate, onDelete }: {
                 className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-[#374151] focus:outline-none focus:border-[#00e676]/40 resize-none transition-colors"
               />
             </div>
+
+            {/* UPGRADE 5: Mistake type (on LOSS) + Lessons learned */}
+            {(entry.outcome === "LOSS" || mistakeType) && (
+              <div>
+                <p className="font-dm-mono text-[10px] text-[#f87171] uppercase tracking-wider mb-1.5">Mistake categorisation</p>
+                <select
+                  value={mistakeType}
+                  onChange={(e) => {
+                    setMistakeType(e.target.value);
+                    const encoded = encodeMistakeNotes(e.target.value, lessons);
+                    patch({ review_notes: encoded });
+                  }}
+                  className="w-full bg-[#f87171]/[0.04] border border-[#f87171]/20 rounded-xl px-3.5 py-2.5 text-white text-sm font-dm-mono outline-none focus:border-[#f87171]/40 transition-colors">
+                  <option value="">— Select mistake type</option>
+                  {MISTAKE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
+            <div>
+              <p className="font-dm-mono text-[10px] text-[#c084fc] uppercase tracking-wider mb-1.5">Lessons learned</p>
+              <textarea
+                value={lessons}
+                onChange={(e) => setLessons(e.target.value)}
+                onBlur={() => {
+                  const encoded = encodeMistakeNotes(mistakeType, lessons);
+                  if (encoded !== (entry.review_notes ?? "")) patch({ review_notes: encoded });
+                }}
+                rows={2} placeholder="What did this trade teach you?"
+                className="w-full bg-[#c084fc]/[0.03] border border-[#c084fc]/15 rounded-xl px-4 py-3 text-sm text-white placeholder-[#374151] focus:outline-none focus:border-[#c084fc]/30 resize-none transition-colors"
+              />
+            </div>
+            {/* Trade duration — UPGRADE 5 */}
+            {entry.exit_time && entry.entry_time_utc && (() => {
+              const entryT = new Date(`1970-01-01T${entry.entry_time_utc}Z`).getTime();
+              const exitT  = new Date(`1970-01-01T${entry.exit_time}Z`).getTime();
+              const diffMs = exitT - entryT;
+              if (diffMs <= 0 || isNaN(diffMs)) return null;
+              const h = Math.floor(diffMs / 3600000);
+              const m = Math.floor((diffMs % 3600000) / 60000);
+              return (
+                <div className="flex items-center gap-2 text-[#6b7280]">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <circle cx="6" cy="6" r="5" stroke="#6b7280" strokeWidth="1.1"/>
+                    <path d="M6 3v3l2 1.5" stroke="#6b7280" strokeWidth="1.1" strokeLinecap="round"/>
+                  </svg>
+                  <span className="font-dm-mono text-[10px]">
+                    Trade duration: {h > 0 ? `${h}h ` : ""}{m}m
+                  </span>
+                </div>
+              );
+            })()}
           </motion.div>
         )}
       </AnimatePresence>
@@ -963,9 +1149,11 @@ export default function JournalPage() {
   const equityData  = useMemo(() => buildEquityCurve(rangedEntries), [rangedEntries]);
   const assetData   = useMemo(() => buildAssetWinRate(rangedEntries), [rangedEntries]);
   const heatmap     = useMemo(() => buildMonthlyHeatmap(entries), [entries]);
-  const sessionBD   = useMemo(() => buildBreakdown(rangedEntries, "entry_session"),   [rangedEntries]);
-  const timeframeBD = useMemo(() => buildBreakdown(rangedEntries, "timeframe"),       [rangedEntries]);
-  const gradeBD     = useMemo(() => buildBreakdown(rangedEntries, "historical_grade"),[rangedEntries]);
+  const sessionBD       = useMemo(() => buildBreakdown(rangedEntries, "entry_session"),   [rangedEntries]);
+  const timeframeBD     = useMemo(() => buildBreakdown(rangedEntries, "timeframe"),       [rangedEntries]);
+  const gradeBD         = useMemo(() => buildBreakdown(rangedEntries, "historical_grade"),[rangedEntries]);
+  const timeOfDayData   = useMemo(() => buildTimeOfDayData(rangedEntries),                [rangedEntries]);
+  const consecutiveData = useMemo(() => buildConsecutiveStats(rangedEntries),             [rangedEntries]);
 
   function handleUpdate(id: string, patch: Partial<JournalEntry>) {
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
@@ -1217,6 +1405,31 @@ export default function JournalPage() {
                       <div className="rounded-2xl p-5 border border-white/[0.06]" style={{ background: "rgba(255,255,255,0.02)" }}>
                         <BreakdownSection title="By Grade"     data={gradeBD} />
                         {gradeBD.length === 0 && <p className="text-[#374151] text-sm font-dm-mono">Run analyses to see grade data</p>}
+                      </div>
+                    </div>
+
+                    {/* UPGRADE 5: Time of day heatmap + consecutive trade analysis */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                      <div className="rounded-2xl p-5 border border-white/[0.06]"
+                        style={{ background: "rgba(255,255,255,0.02)" }}>
+                        <p className="font-dm-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#6b7280] mb-4">
+                          Win Rate by Hour (UTC)
+                        </p>
+                        <TimeOfDayGrid data={timeOfDayData} />
+                      </div>
+                      <div className="rounded-2xl p-5 border border-white/[0.06]"
+                        style={{ background: "rgba(255,255,255,0.02)" }}>
+                        <p className="font-dm-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#6b7280] mb-4">
+                          Win Rate by Trade Number (Day)
+                        </p>
+                        {consecutiveData.filter((d) => d.total > 0).length > 0 ? (
+                          <ConsecutiveStats data={consecutiveData} />
+                        ) : (
+                          <p className="text-[#374151] text-sm font-dm-mono">Need more trade data</p>
+                        )}
+                        <p className="font-dm-mono text-[9px] text-[#374151] mt-3">
+                          Performance on 1st, 2nd, 3rd+ trade taken each trading day
+                        </p>
                       </div>
                     </div>
                   </>

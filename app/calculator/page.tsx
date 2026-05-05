@@ -176,6 +176,179 @@ function FuturesContractInfo({ spec, symbol }: { spec: FuturesSpec; symbol: stri
   );
 }
 
+// ── UPGRADE 7: Trade stat tools ────────────────────────────────
+function TradeStatTools({ balVal, riskPct, rr1, sym }: {
+  balVal: number; riskPct: number; rr1: number; sym: string;
+}) {
+  const [winRate, setWinRate] = useState(50);
+  const [growthTrades, setGrowthTrades] = useState(50);
+
+  // Kelly Criterion
+  const w = winRate / 100;
+  const l = 1 - w;
+  const fullKelly = w - l / Math.max(0.01, rr1);
+  const halfKelly = fullKelly / 2;
+
+  // Break-even win rate for given R:R
+  const breakEven = 1 / (1 + rr1) * 100;
+
+  // 5-loss drawdown sequence
+  const lossSeq: number[] = [];
+  let bal = balVal;
+  for (let i = 0; i < 5; i++) {
+    bal = bal * (1 - riskPct / 100);
+    lossSeq.push(bal);
+  }
+  const fiveLossDD = ((balVal - lossSeq[4]) / balVal) * 100;
+
+  // Compound growth projector
+  const gain = (riskPct / 100) * rr1;
+  const loss = riskPct / 100;
+  const growthData: { t: number; val: number }[] = [{ t: 0, val: balVal }];
+  let gBal = balVal;
+  for (let t = 1; t <= growthTrades; t++) {
+    gBal = gBal * (1 + gain) * w * 1 + gBal * (1 - loss) * l * 1;
+    // Expected value compound: bal * (1 + W*gain - L*loss)
+    gBal = growthData[t - 1].val * (1 + w * gain - l * loss);
+    growthData.push({ t, val: Math.max(0, Math.round(gBal)) });
+  }
+  const finalGrowth = growthData[growthTrades].val;
+  const growthPct = ((finalGrowth - balVal) / balVal) * 100;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, delay: 0.08 }}
+      className="mt-6 p-6 rounded-2xl space-y-5"
+      style={{ background: "#0d1310", border: "1px solid rgba(56,189,248,0.16)" }}
+    >
+      <div>
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.2em] text-[#38bdf8] font-bold mb-1">Trade Stat Tools</p>
+        <p className="text-[#6b7280] text-xs">Kelly Criterion · Break-even · Drawdown · Growth</p>
+      </div>
+
+      {/* Win rate slider — shared input */}
+      <div>
+        <div className="flex justify-between items-center mb-1.5">
+          <p className="font-dm-mono text-[10px] uppercase tracking-[0.12em] text-[#6b7280] font-semibold">Your win rate</p>
+          <span className="font-dm-mono text-sm font-bold text-white">{winRate}%</span>
+        </div>
+        <input type="range" min={10} max={90} step={1} value={winRate}
+          onChange={(e) => setWinRate(+e.target.value)}
+          className="w-full h-2 rounded-full appearance-none cursor-pointer" style={{ accentColor: "#38bdf8" }} />
+        <div className="flex justify-between font-dm-mono text-[9px] text-[#4b5563] mt-1">
+          <span>10%</span><span>50%</span><span>90%</span>
+        </div>
+      </div>
+
+      {/* Kelly Criterion */}
+      <div className="rounded-xl p-4" style={{ background: "rgba(56,189,248,0.05)", border: "1px solid rgba(56,189,248,0.15)" }}>
+        <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#38bdf8] font-bold mb-3">Kelly Criterion</p>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { label: "Full Kelly",  val: fullKelly > 0 ? `${(fullKelly * 100).toFixed(1)}%` : "0% (edge-less)", color: fullKelly > 0 ? "#38bdf8" : "#f87171" },
+            { label: "Half Kelly",  val: halfKelly > 0 ? `${(halfKelly * 100).toFixed(1)}%` : "Avoid",          color: halfKelly > 0 ? "#7dd3fc" : "#f87171" },
+          ].map((r) => (
+            <div key={r.label} className="text-center">
+              <p className="font-dm-mono text-[9px] text-[#6b7280] mb-1">{r.label}</p>
+              <p className="font-dm-mono text-xl font-bold" style={{ color: r.color }}>{r.val}</p>
+            </div>
+          ))}
+        </div>
+        <p className="font-dm-mono text-[9px] text-[#4b5563] mt-2 text-center">
+          {fullKelly > 0
+            ? `Optimal bet size at ${winRate}% win / 1:${rr1.toFixed(1)} RR — use half Kelly for drawdown control`
+            : "No statistical edge at this win rate and R:R — increase either to generate positive Kelly"}
+        </p>
+      </div>
+
+      {/* Break-even win rate */}
+      <div className="rounded-xl p-4" style={{ background: "rgba(167,139,250,0.05)", border: "1px solid rgba(167,139,250,0.15)" }}>
+        <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#a78bfa] font-bold mb-3">Break-even win rate</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-dm-mono text-[28px] font-bold text-white leading-none">{breakEven.toFixed(1)}%</p>
+            <p className="font-dm-mono text-[10px] text-[#6b7280] mt-1">minimum to be profitable at 1:{rr1.toFixed(1)} R:R</p>
+          </div>
+          <div className="text-right">
+            <p className="font-dm-mono text-sm font-bold" style={{ color: winRate >= breakEven ? "#4ade80" : "#f87171" }}>
+              {winRate >= breakEven ? "✓ ABOVE break-even" : "✗ BELOW break-even"}
+            </p>
+            <p className="font-dm-mono text-[10px] text-[#6b7280] mt-1">
+              your win rate: {winRate}% {winRate >= breakEven ? `(+${(winRate - breakEven).toFixed(1)}% edge)` : `(${(winRate - breakEven).toFixed(1)}% deficit)`}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 h-[5px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+          <div className="h-full rounded-full" style={{ width: `${Math.min(100, (winRate / 90) * 100)}%`, background: winRate >= breakEven ? "#4ade80" : "#f87171" }} />
+          <div className="h-full w-px absolute mt-[-5px]" style={{ left: `${Math.min(100, (breakEven / 90) * 100)}%`, background: "#a78bfa" }} />
+        </div>
+      </div>
+
+      {/* 5-loss drawdown simulator */}
+      {balVal > 0 && (
+        <div className="rounded-xl p-4" style={{ background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.15)" }}>
+          <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#f87171] font-bold mb-3">
+            5 consecutive losses at {riskPct}% risk
+          </p>
+          <div className="space-y-2">
+            {[{ t: 0, v: balVal }, ...lossSeq.map((v, i) => ({ t: i + 1, v }))].map((row, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="font-dm-mono text-[9px] text-[#6b7280] w-12 flex-shrink-0">
+                  {i === 0 ? "Start" : `Loss ${i}`}
+                </span>
+                <div className="flex-1 h-[5px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <div className="h-full rounded-full" style={{ width: `${(row.v / balVal) * 100}%`, background: i === 0 ? "#00e676" : i <= 2 ? "#f59e0b" : "#f87171" }} />
+                </div>
+                <span className="font-dm-mono text-[10px] font-bold text-white w-20 text-right">
+                  {sym}{row.v.toFixed(0)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="font-dm-mono text-[10px] mt-3" style={{ color: fiveLossDD > 15 ? "#f87171" : "#f59e0b" }}>
+            Total drawdown after 5 losses: {fiveLossDD.toFixed(1)}%
+            {fiveLossDD > 15 ? " — reduce risk per trade" : " — within manageable range"}
+          </p>
+        </div>
+      )}
+
+      {/* Compound growth projector */}
+      {balVal > 0 && fullKelly > 0 && (
+        <div className="rounded-xl p-4" style={{ background: "rgba(74,222,128,0.04)", border: "1px solid rgba(74,222,128,0.12)" }}>
+          <div className="flex items-center justify-between mb-3">
+            <p className="font-dm-mono text-[9px] uppercase tracking-widest text-[#4ade80] font-bold">Compound growth</p>
+            <div className="flex items-center gap-2">
+              <span className="font-dm-mono text-[9px] text-[#6b7280]">trades:</span>
+              <input type="range" min={10} max={200} step={10} value={growthTrades}
+                onChange={(e) => setGrowthTrades(+e.target.value)}
+                className="w-20 h-1.5 rounded-full appearance-none cursor-pointer" style={{ accentColor: "#4ade80" }} />
+              <span className="font-dm-mono text-[10px] text-white w-8">{growthTrades}</span>
+            </div>
+          </div>
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="font-dm-mono text-[10px] text-[#6b7280] mb-1">Expected balance</p>
+              <p className="font-dm-mono text-[28px] font-bold leading-none" style={{ color: growthPct >= 0 ? "#4ade80" : "#f87171" }}>
+                {sym}{finalGrowth.toLocaleString()}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="font-dm-mono text-[10px] text-[#6b7280] mb-1">{growthTrades} trades</p>
+              <p className="font-dm-mono text-lg font-bold" style={{ color: growthPct >= 0 ? "#4ade80" : "#f87171" }}>
+                {growthPct >= 0 ? "+" : ""}{growthPct.toFixed(0)}%
+              </p>
+            </div>
+          </div>
+          <p className="font-dm-mono text-[9px] text-[#4b5563] mt-2">
+            Based on {winRate}% win rate, 1:{rr1.toFixed(1)} R:R, {riskPct}% risk/trade — mathematical expectation only
+          </p>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
 export default function CalculatorPage() {
   const { isElite } = useUserPlan();
   const [clientId, setClientId] = useState<string | null>(null);
@@ -581,6 +754,14 @@ export default function CalculatorPage() {
             Margin estimates are approximate. Always verify with your broker. ·{" "}
             <a href="/#analyze" className="hover:text-[#6b7280] transition-colors">Analyze a chart →</a>
           </p>
+
+          {/* ── UPGRADE 7: Trade stat tools ── */}
+          <TradeStatTools
+            balVal={balVal}
+            riskPct={riskPct}
+            rr1={calc?.rr1 ?? 2}
+            sym={sym}
+          />
 
           {/* ── Risk of Ruin ── */}
           <RiskOfRuin isElite={isElite} currency={currency} clientId={clientId} />

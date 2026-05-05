@@ -1,12 +1,51 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/app/lib/auth-context";
 import { useUserPlan } from "@/app/lib/plan-context";
 import { useGamification } from "@/app/lib/gamification-context";
 import { getLevelInfo } from "@/app/lib/gamification";
+
+// ── Session clock (UPGRADE 12) ────────────────────────────────
+const SESSIONS_DEF = [
+  { name: "AS", label: "Asian",  start:   0, end:  540, color: "#818cf8" },
+  { name: "LN", label: "London", start: 480, end: 1020, color: "#f59e0b" },
+  { name: "NY", label: "NY",     start: 780, end: 1320, color: "#4ade80" },
+] as const;
+
+function SessionClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const minsNow = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const utcStr  = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")} UTC`;
+
+  return (
+    <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg"
+      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+      <div className="flex items-center gap-1">
+        {SESSIONS_DEF.map((s) => {
+          const active = minsNow >= s.start && minsNow < s.end;
+          return (
+            <div key={s.name} className="flex items-center gap-0.5" title={`${s.label} session${active ? " — OPEN" : " — CLOSED"}`}>
+              <span className="w-[6px] h-[6px] rounded-full flex-shrink-0"
+                style={{ background: active ? s.color : "rgba(255,255,255,0.12)", boxShadow: active ? `0 0 5px ${s.color}` : "none" }} />
+              <span className="font-dm-mono text-[8px]" style={{ color: active ? s.color : "#374151" }}>{s.name}</span>
+            </div>
+          );
+        })}
+      </div>
+      <span className="font-dm-mono text-[9px] text-[#4b5563]">|</span>
+      <span className="font-dm-mono text-[9px] text-[#6b7280]">{utcStr}</span>
+    </div>
+  );
+}
 
 // ── Logo ───────────────────────────────────────────────────────
 function LogoMark() {
@@ -136,6 +175,7 @@ export default function AppNav() {
   const { isPro, isElite }          = useUserPlan();
   const { state }                   = useGamification();
   const myInfo                      = getLevelInfo(state.xp);
+  const router                      = useRouter();
 
   const [dropdown, setDropdown]     = useState<DropdownKey>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -144,6 +184,22 @@ export default function AppNav() {
   const [mobileResources, setMobileResources] = useState(false);
 
   const closeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // UPGRADE 12: keyboard shortcuts (Alt+key)
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      const map: Record<string, string> = {
+        a: "/", j: "/journal", c: "/calculator", p: "/prop-firm", w: "/watchlist",
+      };
+      const dest = map[e.key.toLowerCase()];
+      if (dest) { e.preventDefault(); router.push(dest); }
+    }
+  }, [router]);
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   function openDrop(k: DropdownKey) {
     if (closeTimeout.current) clearTimeout(closeTimeout.current);
@@ -194,6 +250,9 @@ export default function AppNav() {
 
             <Link href="/account" className="text-[13px] text-[#6b7280] hover:text-white transition-colors">Account</Link>
           </div>
+
+          {/* Session clock — UPGRADE 12 */}
+          <SessionClock />
 
           {/* Right side */}
           <div className="flex items-center gap-2.5">

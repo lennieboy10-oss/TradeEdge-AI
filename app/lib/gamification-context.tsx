@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import {
   getLevelInfo, getStreakMultiplier, STREAK_MILESTONES,
-  ACHIEVEMENTS, XP, todayUTC, getDailyChallenges,
+  ACHIEVEMENTS, XP, todayUTC, getDailyChallenges, getWeekStart,
   type XPAction, type GamStats,
 } from "./gamification";
 
@@ -33,6 +33,9 @@ export interface GamState {
   freezesAvailable: number;
   lastFreezeReset:  string | null;
   welcomeSteps:     string[];
+  // weekly XP
+  weeklyXP:         number;
+  weekStart:        string | null;
   // daily challenge progress
   challengeDate:    string | null;
   challengeProgress: Record<string, number>;
@@ -54,6 +57,7 @@ const DEFAULT_STATE: GamState = {
   winRate: 0, totalLogged: 0,
   freezesAvailable: 0, lastFreezeReset: null,
   welcomeSteps: [],
+  weeklyXP: 0, weekStart: null,
   challengeDate: null, challengeProgress: {}, challengesDone: [], bonusClaimed: false,
   todayAnalyses: 0, todayAssets: [], todayConfidence: [], analysisDate: null,
 };
@@ -220,6 +224,11 @@ export function GamificationProvider({ children, isPro, isElite }: {
       if (info.level > oldLvl) {
         queueCelebration({ type: "level_up", level: info.level, title: info.title });
       }
+
+      // Weekly XP
+      const wk = getWeekStart();
+      patch.weekStart = wk;
+      patch.weeklyXP = prev.weekStart === wk ? (prev.weeklyXP ?? 0) + gained : gained;
 
       // Toast
       const tid = ++toastCounterRef.current;

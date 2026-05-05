@@ -107,6 +107,21 @@ export default function GamificationBar() {
           )}
         </div>
 
+        {/* Weekly XP + freeze */}
+        <div className="flex-shrink-0 text-right hidden sm:block">
+          {(state.weeklyXP ?? 0) > 0 && (
+            <p className="font-dm-mono text-[10px] font-semibold"
+              style={{ color: "#ffd740" }}>
+              +{(state.weeklyXP ?? 0).toLocaleString()} XP this week
+            </p>
+          )}
+          {state.freezesAvailable > 0 && (
+            <p className="font-dm-mono text-[9px] text-[#60a5fa] mt-0.5">
+              🧊 {state.freezesAvailable} streak freeze{state.freezesAvailable > 1 ? "s" : ""}
+            </p>
+          )}
+        </div>
+
         {/* Nav links */}
         <div className="flex items-center gap-2 ml-auto">
           <a href="/achievements"

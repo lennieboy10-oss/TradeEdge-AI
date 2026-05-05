@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import AppNav from "@/app/components/AppNav";
@@ -31,12 +31,79 @@ type JournalSnap = {
   take_profit: string | null;
 };
 
+type LivePrice = {
+  label: string;
+  price: string;
+  change: number;
+};
+
 type AlertDraft = {
   alert_signal: string;
   alert_confidence: string;
   alert_price: string;
   alert_email: string;
 };
+
+// ── Price utils ────────────────────────────────────────────────
+const PAIR_LABEL_MAP: Record<string, string> = {
+  XAUUSD: "XAU/USD", XAGUSD: "XAG/USD",
+  BTCUSD: "BTC/USD", ETHUSD: "ETH/USD", SOLUSD: "SOL/USD",
+  EURUSD: "EUR/USD", GBPUSD: "GBP/USD", USDJPY: "USD/JPY",
+  AUDUSD: "AUD/USD", USDCAD: "USD/CAD", USDCHF: "USD/CHF",
+  NZDUSD: "NZD/USD", GBPJPY: "GBP/JPY", EURJPY: "EUR/JPY",
+  EURGBP: "EUR/GBP", OILUSD: "OIL/USD",
+  SPX500: "SPX500", NAS100: "NAS100",
+};
+
+function normalizePairLabel(raw: string): string {
+  const clean = raw.replace(/[\/\-\s]/g, "").toUpperCase();
+  return PAIR_LABEL_MAP[clean] ?? raw.toUpperCase();
+}
+
+function findLivePrice(pair: string, prices: LivePrice[]): LivePrice | null {
+  const norm = normalizePairLabel(pair);
+  return prices.find((p) => p.label.toUpperCase() === norm.toUpperCase()) ?? null;
+}
+
+function calcDistance(liveStr: string, targetStr: string | null): string | null {
+  if (!targetStr) return null;
+  const live   = parseFloat(liveStr.replace(/[^0-9.]/g, ""));
+  const target = parseFloat(targetStr.replace(/[^0-9.]/g, ""));
+  if (isNaN(live) || isNaN(target) || live === 0) return null;
+  const pct = ((target - live) / live) * 100;
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(2)}%`;
+}
+
+// ── Sparkline component ────────────────────────────────────────
+function Sparkline({ pair, isUp }: { pair: string; isUp: boolean }) {
+  const [points, setPoints] = useState<number[]>([]);
+
+  useEffect(() => {
+    fetch(`/api/sparkline?pair=${encodeURIComponent(pair)}`)
+      .then((r) => r.json())
+      .then((d) => setPoints(d.points ?? []))
+      .catch(() => {});
+  }, [pair]);
+
+  if (points.length < 2) {
+    return <div className="w-[72px] h-[28px] opacity-10 bg-white/10 rounded" />;
+  }
+
+  const W = 72;
+  const H = 28;
+  const xs = points.map((_, i) => (i / (points.length - 1)) * W);
+  const ys = points.map((v) => H - v * (H - 4) - 2);
+  const d  = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+
+  const color = isUp ? "#00e676" : "#f87171";
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} fill="none" className="flex-shrink-0">
+      <path d={d} stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+    </svg>
+  );
+}
 
 // ── Shared UI ──────────────────────────────────────────────────
 function LogoMark() {
@@ -97,21 +164,19 @@ function timeAgo(dateStr: string) {
   return `${d}d ago`;
 }
 
+function signalAge(dateStr: string): { label: string; stale: boolean } {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const h = diff / 3_600_000;
+  return { label: timeAgo(dateStr), stale: h > 24 };
+}
+
 // ── Alert settings panel ───────────────────────────────────────
 function AlertPanel({
-  item,
-  draft,
-  onChange,
-  onSave,
-  saving,
-  isPro,
+  item, draft, onChange, onSave, saving, isPro,
 }: {
-  item: WatchlistItem;
-  draft: AlertDraft;
+  item: WatchlistItem; draft: AlertDraft;
   onChange: (k: keyof AlertDraft, v: string) => void;
-  onSave: () => void;
-  saving: boolean;
-  isPro: boolean;
+  onSave: () => void; saving: boolean; isPro: boolean;
 }) {
   if (!isPro) {
     return (
@@ -121,8 +186,7 @@ function AlertPanel({
           <path d="M5 7V5a3 3 0 016 0v2" stroke="#4b5563" strokeWidth="1.3" strokeLinecap="round"/>
         </svg>
         <p className="text-[#4b5563] text-xs flex-1">Upgrade to Pro to enable email alerts.</p>
-        <Link href="/account"
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0"
+        <Link href="/account" className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0"
           style={{ background: "#00e676", color: "#080a10" }}>
           Upgrade
         </Link>
@@ -131,17 +195,11 @@ function AlertPanel({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.22 }}
-      className="overflow-hidden"
-    >
+    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.22 }} className="overflow-hidden">
       <div className="mt-3 p-4 rounded-xl border border-[#00e676]/15 bg-[#00e676]/[0.04] space-y-3">
         <p className="text-[#00e676] text-[10px] font-semibold uppercase tracking-[0.12em] font-dm-mono">Alert Conditions</p>
 
-        {/* Signal condition */}
         <div>
           <p className="text-[#6b7280] text-xs mb-2">Alert when signal changes to:</p>
           <div className="flex gap-2">
@@ -159,37 +217,28 @@ function AlertPanel({
           </div>
         </div>
 
-        {/* Confidence condition */}
         <div>
           <p className="text-[#6b7280] text-xs mb-1.5">Alert when confidence is above:</p>
           <div className="flex items-center gap-2">
             <input type="number" min="0" max="100" value={draft.alert_confidence}
-              onChange={(e) => onChange("alert_confidence", e.target.value)}
-              placeholder="e.g. 75"
-              className="w-24 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.09] text-white text-sm font-dm-mono focus:outline-none focus:border-[#00e676]/50 transition-colors"
-            />
+              onChange={(e) => onChange("alert_confidence", e.target.value)} placeholder="e.g. 75"
+              className="w-24 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.09] text-white text-sm font-dm-mono focus:outline-none focus:border-[#00e676]/50 transition-colors" />
             <span className="text-[#6b7280] text-sm">%</span>
           </div>
         </div>
 
-        {/* Price level */}
         <div>
           <p className="text-[#6b7280] text-xs mb-1.5">Alert when price hits:</p>
-          <input type="text" value={draft.alert_price}
-            onChange={(e) => onChange("alert_price", e.target.value)}
+          <input type="text" value={draft.alert_price} onChange={(e) => onChange("alert_price", e.target.value)}
             placeholder="e.g. 1900.00"
-            className="w-full px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.09] text-white text-sm font-dm-mono focus:outline-none focus:border-[#00e676]/50 transition-colors"
-          />
+            className="w-full px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.09] text-white text-sm font-dm-mono focus:outline-none focus:border-[#00e676]/50 transition-colors" />
         </div>
 
-        {/* Email */}
         <div>
           <p className="text-[#6b7280] text-xs mb-1.5">Send alerts to:</p>
-          <input type="email" value={draft.alert_email}
-            onChange={(e) => onChange("alert_email", e.target.value)}
+          <input type="email" value={draft.alert_email} onChange={(e) => onChange("alert_email", e.target.value)}
             placeholder="your@email.com"
-            className="w-full px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.09] text-white text-sm focus:outline-none focus:border-[#00e676]/50 transition-colors"
-          />
+            className="w-full px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.09] text-white text-sm focus:outline-none focus:border-[#00e676]/50 transition-colors" />
         </div>
 
         <button onClick={onSave} disabled={saving}
@@ -204,17 +253,13 @@ function AlertPanel({
 
 // ── Watchlist card ─────────────────────────────────────────────
 function WatchlistCard({
-  item,
-  journal,
-  isPro,
-  onRemove,
-  onToggleAlerts,
-  onSaveAlerts,
-  savingAlerts,
+  item, journal, isPro, livePrice,
+  onRemove, onToggleAlerts, onSaveAlerts, savingAlerts,
 }: {
   item: WatchlistItem;
   journal: JournalSnap | null;
   isPro: boolean;
+  livePrice: LivePrice | null;
   onRemove: (id: string) => void;
   onToggleAlerts: (item: WatchlistItem) => void;
   onSaveAlerts: (item: WatchlistItem, draft: AlertDraft) => void;
@@ -228,78 +273,124 @@ function WatchlistCard({
     alert_email:      item.alert_email      ?? "",
   });
 
-  const confColor = journal?.confidence
-    ? journal.confidence >= 75 ? "#00e676" : journal.confidence >= 50 ? "#9ca3af" : "#f87171"
-    : "#4b5563";
+  const isUp = (livePrice?.change ?? 0) >= 0;
+  const sig  = signalAge(journal?.created_at ?? item.created_at);
+
+  const distToTP = livePrice && journal?.take_profit
+    ? calcDistance(livePrice.price, journal.take_profit) : null;
+  const distToSL = livePrice && journal?.stop_loss
+    ? calcDistance(livePrice.price, journal.stop_loss) : null;
+  const distToEntry = livePrice && journal?.entry
+    ? calcDistance(livePrice.price, journal.entry) : null;
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ duration: 0.28 }}
+    <motion.div layout initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.96 }} transition={{ duration: 0.28 }}
       className="card-dark p-5 group transition-all duration-200"
       style={{ border: "1px solid rgba(255,255,255,0.06)" }}
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(0,230,118,0.22)")}
-      onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}
-    >
+      onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}>
+
       {/* Top row */}
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="flex items-center gap-3 flex-wrap flex-1 min-w-0">
           <h2 className="font-bebas text-[32px] leading-none tracking-[0.04em] text-white">{item.pair}</h2>
           {journal?.signal && <SignalBadge signal={journal.signal} />}
+          {journal && (
+            <span className="font-dm-mono text-[10px] px-2 py-0.5 rounded-full"
+              style={sig.stale
+                ? { background: "rgba(245,158,11,0.1)", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.25)" }
+                : { background: "rgba(74,222,128,0.08)", color: "#4ade80", border: "1px solid rgba(74,222,128,0.2)" }}>
+              {sig.stale ? "⚠ " : ""}{sig.label}
+            </span>
+          )}
         </div>
-        <button
-          onClick={() => onRemove(item.id)}
+        <button onClick={() => onRemove(item.id)}
           className="w-7 h-7 rounded-lg bg-white/[0.05] hover:bg-red-500/20 flex items-center justify-center transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
-          title="Remove from watchlist"
-        >
+          title="Remove from watchlist">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
             <path d="M2 2l6 6M8 2L2 8" stroke="#9ca3af" strokeWidth="1.3" strokeLinecap="round" />
           </svg>
         </button>
       </div>
 
-      {/* Journal data row */}
-      {journal ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-4">
+      {/* Live price row */}
+      {livePrice ? (
+        <div className="flex items-center gap-4 mb-3">
+          <div className="flex items-baseline gap-2">
+            <span className="font-dm-mono text-xl font-bold text-white">{livePrice.price}</span>
+            <span className="font-dm-mono text-xs font-semibold" style={{ color: isUp ? "#4ade80" : "#f87171" }}>
+              {isUp ? "▲" : "▼"} {Math.abs(livePrice.change).toFixed(2)}%
+            </span>
+          </div>
+          <Sparkline pair={item.pair} isUp={isUp} />
+        </div>
+      ) : (
+        <div className="mb-3 flex items-center gap-2">
+          <span className="font-dm-mono text-xs text-[#374151]">Price unavailable</span>
+        </div>
+      )}
+
+      {/* Key levels row */}
+      {(distToTP || distToSL || distToEntry) && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3">
+          {journal?.entry && distToEntry && (
+            <span className="font-dm-mono text-[11px]">
+              <span className="text-[#6b7280]">Entry </span>
+              <span className="text-white">{journal.entry}</span>
+              <span className="ml-1" style={{ color: parseFloat(distToEntry) >= 0 ? "#f59e0b" : "#818cf8" }}>
+                ({distToEntry})
+              </span>
+            </span>
+          )}
+          {journal?.take_profit && distToTP && (
+            <span className="font-dm-mono text-[11px]">
+              <span className="text-[#6b7280]">TP </span>
+              <span className="text-white">{journal.take_profit}</span>
+              <span className="ml-1 text-[#4ade80]">({distToTP})</span>
+            </span>
+          )}
+          {journal?.stop_loss && distToSL && (
+            <span className="font-dm-mono text-[11px]">
+              <span className="text-[#6b7280]">SL </span>
+              <span className="text-white">{journal.stop_loss}</span>
+              <span className="ml-1 text-[#f87171]">({distToSL})</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Journal meta */}
+      {journal && !livePrice && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3">
           {journal.confidence != null && (
-            <span className="font-dm-mono text-xs font-semibold" style={{ color: confColor }}>
+            <span className="font-dm-mono text-xs font-semibold"
+              style={{ color: journal.confidence >= 75 ? "#00e676" : journal.confidence >= 50 ? "#9ca3af" : "#f87171" }}>
               {journal.confidence}% conf
             </span>
           )}
-          {journal.timeframe && (
-            <span className="font-dm-mono text-[#4b5563] text-xs">{journal.timeframe}</span>
-          )}
-          <span className="font-dm-mono text-[#4b5563] text-xs">
-            Last analysed {timeAgo(journal.created_at)}
-          </span>
+          {journal.timeframe && <span className="font-dm-mono text-[#4b5563] text-xs">{journal.timeframe}</span>}
         </div>
-      ) : (
-        <p className="text-[#4b5563] text-xs font-dm-mono mb-4">No analysis yet for this pair</p>
+      )}
+      {!journal && !livePrice && (
+        <p className="text-[#4b5563] text-xs font-dm-mono mb-3">No analysis yet for this pair</p>
       )}
 
       {/* Bottom row */}
-      <div className="flex items-center gap-3">
-        {/* Analyse Now */}
-        <Link
-          href={`/?asset=${encodeURIComponent(item.pair)}#analyze`}
+      <div className="flex items-center gap-3 mt-1">
+        <Link href={`/?asset=${encodeURIComponent(item.pair)}#analyze`}
           className="flex-1 text-center py-2 rounded-xl text-xs font-bold transition-all duration-150 hover:-translate-y-0.5"
-          style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 14px rgba(0,230,118,0.22)" }}
-        >
+          style={{ background: "#00e676", color: "#080a10", boxShadow: "0 0 14px rgba(0,230,118,0.22)" }}>
           Analyse Now →
         </Link>
-
-        {/* Alerts toggle */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {!isPro && (
-            <div className="relative group">
+            <div className="relative group/tip">
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                 <rect x="1.5" y="5.5" width="9" height="6" rx="1.5" stroke="#4b5563" strokeWidth="1.2"/>
                 <path d="M3.5 5.5V3.8a2.5 2.5 0 015 0V5.5" stroke="#4b5563" strokeWidth="1.2" strokeLinecap="round"/>
               </svg>
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg text-[10px] font-dm-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10"
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg text-[10px] font-dm-mono whitespace-nowrap opacity-0 group-hover/tip:opacity-100 transition-opacity pointer-events-none z-10"
                 style={{ background: "#1a1f2e", border: "1px solid rgba(255,255,255,0.1)", color: "#9ca3af" }}>
                 Pro feature — upgrade to enable alerts
                 <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0"
@@ -308,20 +399,12 @@ function WatchlistCard({
             </div>
           )}
           <span className="text-[#6b7280] text-xs">Alerts</span>
-          <Toggle
-            on={item.alerts_enabled}
-            onClick={() => {
-              if (!isPro) { setExpanded(true); return; }
-              onToggleAlerts(item);
-              if (!item.alerts_enabled) setExpanded(true);
-              else setExpanded(false);
-            }}
-          />
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="text-[#4b5563] hover:text-[#9ca3af] transition-colors"
-            title="Configure alerts"
-          >
+          <Toggle on={item.alerts_enabled} onClick={() => {
+            if (!isPro) { setExpanded(true); return; }
+            onToggleAlerts(item);
+            if (!item.alerts_enabled) setExpanded(true); else setExpanded(false);
+          }} />
+          <button onClick={() => setExpanded((v) => !v)} className="text-[#4b5563] hover:text-[#9ca3af] transition-colors" title="Configure alerts">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M2 4.5h10M4.5 7h5M6 9.5h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
             </svg>
@@ -329,24 +412,19 @@ function WatchlistCard({
         </div>
       </div>
 
-      {/* Alert panel */}
       <AnimatePresence>
         {expanded && (
-          <AlertPanel
-            item={item}
-            draft={draft}
+          <AlertPanel item={item} draft={draft}
             onChange={(k, v) => setDraft((prev) => ({ ...prev, [k]: v }))}
             onSave={() => onSaveAlerts(item, draft)}
-            saving={savingAlerts}
-            isPro={isPro}
-          />
+            saving={savingAlerts} isPro={isPro} />
         )}
       </AnimatePresence>
     </motion.div>
   );
 }
 
-// ── Lock icon ─────────────────────────────────────────────────
+// ── Lock icon ──────────────────────────────────────────────────
 function WatchlistLockIcon() {
   return (
     <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
@@ -360,18 +438,29 @@ function WatchlistLockIcon() {
 // ── Page ───────────────────────────────────────────────────────
 export default function WatchlistPage() {
   const { isPro: isProUser } = useUserPlan();
-  const [items, setItems]               = useState<WatchlistItem[]>([]);
-  const [journalMap, setJournalMap]     = useState<Record<string, JournalSnap>>({});
-  const [loading, setLoading]           = useState(true);
-  const [addInput, setAddInput]         = useState("");
-  const [addLoading, setAddLoading]     = useState(false);
-  const [addError, setAddError]         = useState<string | null>(null);
-  const [savingId, setSavingId]         = useState<string | null>(null);
-  const [clientId, setClientId]         = useState<string | null>(null);
-  const [plan, setPlan]                 = useState("free");
+  const [items, setItems]           = useState<WatchlistItem[]>([]);
+  const [journalMap, setJournalMap] = useState<Record<string, JournalSnap>>({});
+  const [livePrices, setLivePrices] = useState<LivePrice[]>([]);
+  const [lastPriceUpdate, setLastPriceUpdate] = useState(0);
+  const [loading, setLoading]       = useState(true);
+  const [addInput, setAddInput]     = useState("");
+  const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError]     = useState<string | null>(null);
+  const [savingId, setSavingId]     = useState<string | null>(null);
+  const [clientId, setClientId]     = useState<string | null>(null);
+  const [plan, setPlan]             = useState("free");
   const isPro = plan === "pro";
+  const priceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load identity
+  const fetchPrices = useCallback(async () => {
+    try {
+      const res  = await fetch("/api/ticker");
+      const data = await res.json();
+      setLivePrices(data.items ?? []);
+      setLastPriceUpdate(Date.now());
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => {
     let id = localStorage.getItem("ciq_client_id");
     if (!id) { id = crypto.randomUUID(); localStorage.setItem("ciq_client_id", id); }
@@ -381,23 +470,25 @@ export default function WatchlistPage() {
       .then((r) => r.json())
       .then((d) => { if (d.plan) { setPlan(d.plan); localStorage.setItem("ciq_plan", d.plan); } })
       .catch(() => {});
-  }, []);
+    fetchPrices();
+    priceTimerRef.current = setInterval(fetchPrices, 30_000);
+    return () => { if (priceTimerRef.current) clearInterval(priceTimerRef.current); };
+  }, [fetchPrices]);
 
-  // Fetch watchlist
   const fetchWatchlist = useCallback(async (cid: string) => {
     setLoading(true);
     try {
-      const res  = await fetch(`/api/watchlist?client_id=${cid}`);
-      const data = await res.json();
+      const res    = await fetch(`/api/watchlist?client_id=${cid}`);
+      const data   = await res.json();
       const fetched: WatchlistItem[] = data.items ?? [];
       setItems(fetched);
 
       if (fetched.length > 0) {
         const pairs = fetched.map((i) => i.pair);
-        const journalRes  = await fetch(`/api/journal?assets=${encodeURIComponent(pairs.join(","))}`);
-        const journalData = await journalRes.json();
+        const jRes  = await fetch(`/api/journal?assets=${encodeURIComponent(pairs.join(","))}`);
+        const jData = await jRes.json();
         const map: Record<string, JournalSnap> = {};
-        for (const e of (journalData.entries ?? [])) {
+        for (const e of (jData.entries ?? [])) {
           const key = (e.asset ?? "").toLowerCase();
           if (!map[key]) map[key] = e;
         }
@@ -422,12 +513,8 @@ export default function WatchlistPage() {
         body: JSON.stringify({ clientId, pair: addInput.trim(), isPro }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setAddError(data.message ?? data.error ?? "Failed to add pair");
-      } else {
-        setItems((prev) => [...prev, data.item]);
-        setAddInput("");
-      }
+      if (!res.ok) setAddError(data.message ?? data.error ?? "Failed to add pair");
+      else { setItems((prev) => [...prev, data.item]); setAddInput(""); }
     } catch { setAddError("Network error"); }
     setAddLoading(false);
   }
@@ -435,8 +522,7 @@ export default function WatchlistPage() {
   async function handleRemove(id: string) {
     if (!clientId) return;
     await fetch("/api/watchlist", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      method: "DELETE", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, clientId }),
     });
     setItems((prev) => prev.filter((i) => i.id !== id));
@@ -446,8 +532,7 @@ export default function WatchlistPage() {
     if (!clientId) return;
     const next = !item.alerts_enabled;
     const res  = await fetch("/api/watchlist", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: item.id, clientId, alerts_enabled: next,
         alert_signal: item.alert_signal, alert_confidence: item.alert_confidence,
         alert_price: item.alert_price, alert_email: item.alert_email }),
@@ -460,11 +545,9 @@ export default function WatchlistPage() {
     if (!clientId) return;
     setSavingId(item.id);
     const res = await fetch("/api/watchlist", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        id: item.id, clientId,
-        alerts_enabled:   true,
+        id: item.id, clientId, alerts_enabled: true,
         alert_signal:     draft.alert_signal || null,
         alert_confidence: draft.alert_confidence ? parseInt(draft.alert_confidence, 10) : null,
         alert_price:      draft.alert_price || null,
@@ -478,11 +561,8 @@ export default function WatchlistPage() {
 
   return (
     <div className="min-h-screen bg-[#080a10] text-white overflow-x-hidden">
-
-      {/* Nav */}
       <AppNav />
 
-      {/* ── Locked for free users ── */}
       {!isProUser ? (
         <ProLockedPage
           icon={<WatchlistLockIcon />}
@@ -490,136 +570,127 @@ export default function WatchlistPage() {
           subtext="Save your favourite pairs and get email alerts when signals fire — Pro only"
           features={[
             "Save unlimited pairs",
+            "Live prices updated every 30 seconds",
+            "Real-time sparkline charts",
+            "Distance to TP/SL from last analysis",
             "Email alerts on signal changes",
-            "Last signal per pair at a glance",
             "One click analyse from watchlist",
           ]}
           ctaLabel="Unlock watchlist — £19/mo"
           clientId={clientId}
         />
       ) : (
-      <>{/* Content */}
-      <div className="max-w-3xl mx-auto px-6 pt-28 pb-24">
+        <>
+          <div className="max-w-3xl mx-auto px-6 pt-28 pb-24">
 
-        {/* Header */}
-        <div className="mb-10">
-          <SectionBadge>
-            <span className="w-2 h-2 rounded-full bg-[#00e676] animate-pulse-dot" />
-            Watchlist
-          </SectionBadge>
-          <h1 className="font-bebas text-[52px] md:text-[64px] leading-none tracking-[0.04em] text-white mb-3">
-            YOUR WATCHLIST
-          </h1>
-          <p className="text-[#6b7280] text-base leading-relaxed max-w-lg">
-            Track your favourite pairs, see last analysis signals, and get email alerts when conditions are met.
-          </p>
-        </div>
-
-        {/* Add pair input */}
-        <div className="card-dark p-5 mb-6">
-          <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Add a pair</p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={addInput}
-              onChange={(e) => { setAddInput(e.target.value); setAddError(null); }}
-              onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
-              placeholder="e.g. XAU/USD, BTC/USD, AAPL"
-              className="flex-1 px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#00e676]/60 transition-colors"
-            />
-            <button
-              onClick={handleAdd}
-              disabled={!addInput.trim() || addLoading}
-              className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-150 hover:-translate-y-0.5 disabled:opacity-40 flex-shrink-0"
-              style={{ background: "#00e676", color: "#080a10" }}>
-              {addLoading ? "…" : "+ Add"}
-            </button>
-          </div>
-          {addError && (
-            <p className="text-red-400 text-xs mt-2 font-dm-mono">{addError}</p>
-          )}
-          {!isPro && (
-            <p className="text-[#4b5563] text-[11px] mt-2 font-dm-mono">
-              Free: up to 5 pairs ·{" "}
-              <Link href="/account" className="text-[#00e676] hover:underline">Upgrade for unlimited</Link>
-            </p>
-          )}
-        </div>
-
-        {/* List */}
-        {loading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="card-dark p-5 rounded-2xl">
-                <div className="skeleton h-8 w-28 rounded mb-3" style={{ animationDelay: `${i * 0.1}s` }} />
-                <div className="skeleton h-3 w-48 rounded mb-2" style={{ animationDelay: `${i * 0.1 + 0.05}s` }} />
-                <div className="skeleton h-8 w-full rounded" style={{ animationDelay: `${i * 0.1 + 0.1}s` }} />
+            <div className="mb-10">
+              <SectionBadge>
+                <span className="w-2 h-2 rounded-full bg-[#00e676] animate-pulse-dot" />
+                Watchlist
+              </SectionBadge>
+              <h1 className="font-bebas text-[52px] md:text-[64px] leading-none tracking-[0.04em] text-white mb-3">
+                YOUR WATCHLIST
+              </h1>
+              <div className="flex items-center gap-4 flex-wrap">
+                <p className="text-[#6b7280] text-base leading-relaxed max-w-lg">
+                  Live prices, signal age, and distance to key levels — all in one place.
+                </p>
+                {lastPriceUpdate > 0 && (
+                  <span className="font-dm-mono text-[10px] text-[#374151]">
+                    Prices: {new Date(lastPriceUpdate).toLocaleTimeString()} · refreshes every 30s
+                  </span>
+                )}
               </div>
-            ))}
-          </div>
-        ) : items.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="rounded-2xl border-2 border-dashed border-[#00e676]/15 flex flex-col items-center justify-center py-20 text-center"
-          >
-            <div className="w-14 h-14 rounded-2xl bg-[#00e676]/[0.06] border border-[#00e676]/15 flex items-center justify-center mb-4">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <path d="M12 5v14M5 12h14" stroke="#00e676" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
             </div>
-            <p className="text-[#4b5563] text-sm font-medium mb-1">No pairs added yet</p>
-            <p className="text-[#374151] text-xs">Add your first pair above to start tracking</p>
-          </motion.div>
-        ) : (
-          <div className="space-y-4">
-            <AnimatePresence mode="popLayout">
-              {items.map((item) => (
-                <WatchlistCard
-                  key={item.id}
-                  item={item}
-                  journal={journalMap[(item.pair ?? "").toLowerCase()] ?? null}
-                  isPro={isPro}
-                  onRemove={handleRemove}
-                  onToggleAlerts={handleToggleAlerts}
-                  onSaveAlerts={handleSaveAlerts}
-                  savingAlerts={savingId === item.id}
-                />
-              ))}
-            </AnimatePresence>
 
-            {/* Pro upsell if free + near limit */}
-            {!isPro && items.length >= 3 && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-2xl border border-[#00e676]/15 bg-[#00e676]/[0.04] p-4 flex items-center justify-between gap-4"
-              >
-                <div>
-                  <p className="text-white text-sm font-semibold">
-                    {items.length >= 5 ? "Watchlist full" : `${5 - items.length} slot${5 - items.length === 1 ? "" : "s"} remaining`}
-                  </p>
-                  <p className="text-[#6b7280] text-xs mt-0.5">Pro gives you unlimited pairs + email alerts.</p>
-                </div>
-                <Link href="/account"
-                  className="px-4 py-2 rounded-xl text-xs font-bold flex-shrink-0 transition-all hover:-translate-y-0.5"
+            {/* Add pair */}
+            <div className="card-dark p-5 mb-6">
+              <p className="text-[#6b7280] text-[10px] font-semibold uppercase tracking-[0.12em] mb-3">Add a pair</p>
+              <div className="flex gap-2">
+                <input type="text" value={addInput}
+                  onChange={(e) => { setAddInput(e.target.value); setAddError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+                  placeholder="e.g. XAU/USD, BTC/USD, AAPL"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#00e676]/60 transition-colors" />
+                <button onClick={handleAdd} disabled={!addInput.trim() || addLoading}
+                  className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-150 hover:-translate-y-0.5 disabled:opacity-40 flex-shrink-0"
                   style={{ background: "#00e676", color: "#080a10" }}>
-                  Upgrade →
-                </Link>
+                  {addLoading ? "…" : "+ Add"}
+                </button>
+              </div>
+              {addError && <p className="text-red-400 text-xs mt-2 font-dm-mono">{addError}</p>}
+              {!isPro && (
+                <p className="text-[#4b5563] text-[11px] mt-2 font-dm-mono">
+                  Free: up to 5 pairs ·{" "}
+                  <Link href="/account" className="text-[#00e676] hover:underline">Upgrade for unlimited</Link>
+                </p>
+              )}
+            </div>
+
+            {/* List */}
+            {loading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="card-dark p-5 rounded-2xl">
+                    <div className="skeleton h-8 w-28 rounded mb-3" style={{ animationDelay: `${i * 0.1}s` }} />
+                    <div className="skeleton h-5 w-36 rounded mb-2" style={{ animationDelay: `${i * 0.1 + 0.05}s` }} />
+                    <div className="skeleton h-8 w-full rounded" style={{ animationDelay: `${i * 0.1 + 0.1}s` }} />
+                  </div>
+                ))}
+              </div>
+            ) : items.length === 0 ? (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="rounded-2xl border-2 border-dashed border-[#00e676]/15 flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-[#00e676]/[0.06] border border-[#00e676]/15 flex items-center justify-center mb-4">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 5v14M5 12h14" stroke="#00e676" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p className="text-[#4b5563] text-sm font-medium mb-1">No pairs added yet</p>
+                <p className="text-[#374151] text-xs">Add your first pair above to start tracking</p>
               </motion.div>
+            ) : (
+              <div className="space-y-4">
+                <AnimatePresence mode="popLayout">
+                  {items.map((item) => (
+                    <WatchlistCard key={item.id} item={item}
+                      journal={journalMap[(item.pair ?? "").toLowerCase()] ?? null}
+                      isPro={isPro}
+                      livePrice={findLivePrice(item.pair, livePrices)}
+                      onRemove={handleRemove}
+                      onToggleAlerts={handleToggleAlerts}
+                      onSaveAlerts={handleSaveAlerts}
+                      savingAlerts={savingId === item.id} />
+                  ))}
+                </AnimatePresence>
+
+                {!isPro && items.length >= 3 && (
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    className="rounded-2xl border border-[#00e676]/15 bg-[#00e676]/[0.04] p-4 flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-white text-sm font-semibold">
+                        {items.length >= 5 ? "Watchlist full" : `${5 - items.length} slot${5 - items.length === 1 ? "" : "s"} remaining`}
+                      </p>
+                      <p className="text-[#6b7280] text-xs mt-0.5">Pro gives you unlimited pairs + email alerts.</p>
+                    </div>
+                    <Link href="/account"
+                      className="px-4 py-2 rounded-xl text-xs font-bold flex-shrink-0 transition-all hover:-translate-y-0.5"
+                      style={{ background: "#00e676", color: "#080a10" }}>
+                      Upgrade →
+                    </Link>
+                  </motion.div>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* Footer */}
-      <footer className="py-10 px-6 border-t border-white/[0.05] text-center">
-        <Link href="/" className="inline-flex items-center gap-2.5 opacity-40 hover:opacity-70 transition-opacity">
-          <LogoMark />
-          <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
-        </Link>
-      </footer>
-      </>
+          <footer className="py-10 px-6 border-t border-white/[0.05] text-center">
+            <Link href="/" className="inline-flex items-center gap-2.5 opacity-40 hover:opacity-70 transition-opacity">
+              <LogoMark />
+              <span className="font-bold text-sm text-white">ChartIQ <span className="text-[#00e676]">AI</span></span>
+            </Link>
+          </footer>
+        </>
       )}
     </div>
   );

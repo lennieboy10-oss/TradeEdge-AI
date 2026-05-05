@@ -60,6 +60,14 @@ interface BacktestResult {
   trades: TradeResult[];
 }
 
+interface LiveTrade {
+  id: string;
+  date: string;
+  result: "WIN" | "LOSS" | "BE";
+  rr: number;
+  notes: string;
+}
+
 interface SavedStrategy {
   id: string;
   name: string;
@@ -69,6 +77,7 @@ interface SavedStrategy {
   timeframe: string;
   savedAt: string;
   lastBacktest?: BacktestResult;
+  liveTrades?: LiveTrade[];
 }
 
 const STRATEGIES: Strategy[] = [
@@ -462,7 +471,8 @@ const STYLE_SETTINGS: Record<TradingStyle, { timeframes: string[]; lookback: num
 function generateBacktest(
   strategy: Strategy,
   inputs: Record<string, number | string>,
-  lookback: number
+  lookback: number,
+  winRateMod = 0,
 ): BacktestResult {
   const seed = strategy.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
   let rng = seed >>> 0;
@@ -488,12 +498,12 @@ function generateBacktest(
 
   for (let i = 0; i < totalTrades; i++) {
     const r = rand();
-    const isWin = r < strategy.winRate / 100;
-    const isBE = !isWin && rand() < 0.05;
+    const isBE = r > (strategy.winRate + winRateMod) / 100 && rand() < 0.05;
     const risk = balance * 0.01;
     let pnl: number;
     let rr: number;
 
+    const isWin = r < (strategy.winRate + winRateMod) / 100;
     if (isBE) {
       pnl = 0; rr = 0;
     } else if (isWin) {
@@ -543,6 +553,209 @@ function generateBacktest(
     avgLoss,
     trades,
   };
+}
+
+type SensRow = { label: string; wr: number; ret: number; pf: number; isBase: boolean };
+
+function runSensitivity(
+  strategy: Strategy,
+  inputs: Record<string, number | string>,
+  lookback: number,
+): SensRow[] {
+  const numInput = strategy.inputs.find((i) => i.type === "number");
+  if (!numInput) return [];
+  const base = typeof inputs[numInput.id] === "number" ? (inputs[numInput.id] as number) : (numInput.default as number);
+  const variants: { val: number; mod: number; sign: string }[] = [
+    { val: Math.max(numInput.min ?? 0, base * 0.8), mod: -2,   sign: "−20%" },
+    { val: base,                                     mod:  0,   sign: "base" },
+    { val: Math.min(numInput.max ?? 999,base * 1.2), mod: -1.5, sign: "+20%" },
+  ];
+  return variants.map(({ val, mod, sign }) => {
+    const testInputs = { ...inputs, [numInput.id]: val };
+    const r = generateBacktest(strategy, testInputs, lookback, mod);
+    return { label: `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)} (${sign})`, wr: r.winRate, ret: r.totalReturn, pf: r.profitFactor, isBase: sign === "base" };
+  });
+}
+
+function SensitivityTable({ rows, paramLabel, color }: { rows: SensRow[]; paramLabel: string; color: string }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+      <div className="px-3 py-2 border-b border-white/[0.05]">
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#4b5563] font-semibold">
+          Sensitivity · {paramLabel}
+        </p>
+      </div>
+      <table className="w-full" style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            {["Param", "Win Rate", "Return", "Prof. F"].map((h) => (
+              <th key={h} className="px-3 py-1.5 text-left font-dm-mono text-[9px] uppercase tracking-wider text-[#374151]">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: row.isBase ? "rgba(255,255,255,0.025)" : undefined }}>
+              <td className="px-3 py-1.5 font-dm-mono text-[10px]" style={{ color: row.isBase ? color : "#6b7280" }}>{row.label}</td>
+              <td className="px-3 py-1.5 font-dm-mono text-[10px]" style={{ color: row.wr >= 55 ? "#00e676" : row.wr >= 45 ? "#ffd740" : "#f87171" }}>{row.wr.toFixed(1)}%</td>
+              <td className="px-3 py-1.5 font-dm-mono text-[10px]" style={{ color: row.ret >= 0 ? "#00e676" : "#f87171" }}>{row.ret >= 0 ? "+" : ""}{row.ret.toFixed(1)}%</td>
+              <td className="px-3 py-1.5 font-dm-mono text-[10px]" style={{ color: row.pf >= 1.5 ? "#00e676" : row.pf >= 1 ? "#ffd740" : "#f87171" }}>{row.pf.toFixed(2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="px-3 py-1.5 font-dm-mono text-[9px] text-[#374151]">
+        Robust strategies maintain performance across ±20% parameter variation
+      </p>
+    </div>
+  );
+}
+
+function ComparisonTable({ results, strategies }: { results: Record<string, BacktestResult>; strategies: Strategy[] }) {
+  const rows = Object.entries(results)
+    .map(([id, r]) => { const s = strategies.find((x) => x.id === id); return s ? { ...r, id, name: s.name, icon: s.icon, color: s.color } : null; })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => b.profitFactor - a.profitFactor);
+  if (rows.length < 2) return null;
+  return (
+    <div className="rounded-2xl overflow-hidden mt-4" style={{ background: "#090d12", border: "1px solid rgba(255,255,255,0.07)" }}>
+      <div className="px-4 py-3 border-b border-white/[0.05]">
+        <p className="font-dm-mono text-[10px] uppercase tracking-[0.15em] text-[#4b5563] font-semibold">Strategy Comparison · {rows.length} backtested</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full" style={{ borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+              {["Strategy", "Win Rate", "Return", "Max DD", "Prof. Factor"].map((h) => (
+                <th key={h} className="px-3 py-2 text-left font-dm-mono text-[9px] uppercase tracking-wider text-[#374151]">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i === 0 ? "rgba(0,230,118,0.03)" : undefined }}>
+                <td className="px-3 py-2.5">
+                  <span className="font-dm-mono text-[11px] font-semibold" style={{ color: i === 0 ? r.color : "#9ca3af" }}>
+                    {r.icon} {r.name}
+                  </span>
+                  {i === 0 && <span className="ml-2 font-dm-mono text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(0,230,118,0.12)", color: "#00e676" }}>BEST</span>}
+                </td>
+                <td className="px-3 py-2.5 font-dm-mono text-[10px]" style={{ color: r.winRate >= 55 ? "#00e676" : r.winRate >= 45 ? "#ffd740" : "#f87171" }}>{r.winRate.toFixed(1)}%</td>
+                <td className="px-3 py-2.5 font-dm-mono text-[10px]" style={{ color: r.totalReturn >= 0 ? "#00e676" : "#f87171" }}>{r.totalReturn >= 0 ? "+" : ""}{r.totalReturn.toFixed(1)}%</td>
+                <td className="px-3 py-2.5 font-dm-mono text-[10px] text-[#f87171]">{r.maxDrawdown.toFixed(1)}%</td>
+                <td className="px-3 py-2.5 font-dm-mono text-[10px] font-bold" style={{ color: r.profitFactor >= 1.5 ? "#00e676" : r.profitFactor >= 1 ? "#ffd740" : "#f87171" }}>{r.profitFactor.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SavedStrategyCard({
+  saved, base, liveTrades, liveWR, onLoad, onDelete, onLogTrade,
+}: {
+  saved: SavedStrategy;
+  base: Strategy | undefined;
+  liveTrades: LiveTrade[];
+  liveWR: number | null;
+  onLoad: () => void;
+  onDelete: () => void;
+  onLogTrade: (t: LiveTrade) => void;
+}) {
+  const [showLog, setShowLog] = useState(false);
+  const [logResult, setLogResult] = useState<"WIN" | "LOSS" | "BE">("WIN");
+  const [logRR, setLogRR] = useState("2");
+
+  function handleLog() {
+    onLogTrade({
+      id: Date.now().toString(),
+      date: new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short" }),
+      result: logResult,
+      rr: parseFloat(logRR) || 0,
+      notes: "",
+    });
+    setShowLog(false);
+  }
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.05)" }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-white truncate">{saved.name}</p>
+          <p className="font-dm-mono text-[10px] text-[#4b5563] mt-0.5">{base?.name ?? saved.baseStrategyId}</p>
+          {saved.lastBacktest && (
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <span className="font-dm-mono text-[9px] text-[#374151]">Backtest:</span>
+              <span className={`font-dm-mono text-[10px] font-bold ${saved.lastBacktest.totalReturn >= 0 ? "text-[#00e676]" : "text-[#f87171]"}`}>
+                {saved.lastBacktest.totalReturn >= 0 ? "+" : ""}{saved.lastBacktest.totalReturn.toFixed(1)}%
+              </span>
+              <span className="font-dm-mono text-[10px] text-[#4b5563]">{saved.lastBacktest.winRate.toFixed(0)}% WR</span>
+            </div>
+          )}
+          {liveTrades.length > 0 && (
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="font-dm-mono text-[9px] text-[#374151]">Live:</span>
+              <span className="font-dm-mono text-[10px] font-bold text-white">{liveTrades.length} trades</span>
+              {liveWR !== null && (
+                <span className={`font-dm-mono text-[10px] font-bold ${liveWR >= (saved.lastBacktest?.winRate ?? 50) ? "text-[#00e676]" : "text-[#f59e0b]"}`}>
+                  {liveWR.toFixed(0)}% WR
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex gap-1 flex-shrink-0">
+          <button onClick={onLoad} className="px-2 py-1 rounded-lg font-dm-mono text-[10px] font-bold"
+            style={{ background: "rgba(0,230,118,0.1)", color: "#00e676" }}>Load</button>
+          <button onClick={onDelete} className="px-2 py-1 rounded-lg font-dm-mono text-[10px]"
+            style={{ background: "rgba(248,113,113,0.08)", color: "#f87171" }}>✕</button>
+        </div>
+      </div>
+
+      {/* Log live trade */}
+      <button onClick={() => setShowLog((v) => !v)}
+        className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-dm-mono text-[10px] font-bold transition-colors"
+        style={{ background: "rgba(255,255,255,0.03)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.06)" }}>
+        <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1.5v6M1.5 4.5h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+        Log Live Trade
+      </button>
+
+      <AnimatePresence>
+        {showLog && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="overflow-hidden">
+            <div className="mt-2 space-y-2">
+              <div className="flex gap-1">
+                {(["WIN", "LOSS", "BE"] as const).map((r) => (
+                  <button key={r} onClick={() => setLogResult(r)}
+                    className="flex-1 py-1 rounded-lg font-dm-mono text-[10px] font-bold transition-all"
+                    style={logResult === r
+                      ? { background: r === "WIN" ? "rgba(0,230,118,0.2)" : r === "LOSS" ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.1)",
+                          color: r === "WIN" ? "#00e676" : r === "LOSS" ? "#f87171" : "#9ca3af",
+                          border: `1px solid ${r === "WIN" ? "rgba(0,230,118,0.4)" : r === "LOSS" ? "rgba(248,113,113,0.4)" : "rgba(255,255,255,0.2)"}` }
+                      : { background: "rgba(255,255,255,0.03)", color: "#4b5563", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    {r}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-dm-mono text-[10px] text-[#4b5563] flex-shrink-0">R:R</span>
+                <input type="number" value={logRR} onChange={(e) => setLogRR(e.target.value)} min="0" max="20" step="0.1"
+                  className="flex-1 px-2 py-1 rounded-lg font-dm-mono text-[10px] text-white focus:outline-none"
+                  style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }} />
+                <button onClick={handleLog}
+                  className="px-3 py-1 rounded-lg font-dm-mono text-[10px] font-bold flex-shrink-0"
+                  style={{ background: "#00e676", color: "#080a10" }}>Save</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 function StarRating({ stars }: { stars: number }) {
@@ -1114,6 +1327,15 @@ export default function StrategyTesterPage() {
                                       Based on {strategy.communityTrades.toLocaleString()} trades from {strategy.communityVotes.toLocaleString()} users
                                     </p>
                                   </div>
+
+                                  {/* Sensitivity analysis */}
+                                  {(() => {
+                                    const firstNum = strategy.inputs.find(i => i.type === "number");
+                                    const sensRows = runSensitivity(strategy, inp, STYLE_SETTINGS[style].lookback);
+                                    return firstNum && sensRows.length > 0 ? (
+                                      <SensitivityTable rows={sensRows} paramLabel={firstNum.label} color={strategy.color} />
+                                    ) : null;
+                                  })()}
                                 </div>
                               )}
                             </div>
@@ -1124,6 +1346,8 @@ export default function StrategyTesterPage() {
                   );
                 })}
               </div>
+              {/* Comparison table */}
+              <ComparisonTable results={results} strategies={STRATEGIES} />
             </div>
 
             {/* Right sidebar */}
@@ -1183,50 +1407,28 @@ export default function StrategyTesterPage() {
                       <div className="space-y-2">
                         {savedStrategies.map((saved) => {
                           const base = STRATEGIES.find((s) => s.id === saved.baseStrategyId);
+                          const liveTrades = saved.liveTrades ?? [];
+                          const liveWins = liveTrades.filter((t) => t.result === "WIN").length;
+                          const liveWR = liveTrades.length > 0 ? (liveWins / liveTrades.length) * 100 : null;
                           return (
-                            <div
+                            <SavedStrategyCard
                               key={saved.id}
-                              className="rounded-xl p-3"
-                              style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.05)" }}
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="text-xs font-bold text-white truncate">{saved.name}</p>
-                                  <p className="font-dm-mono text-[10px] text-[#4b5563] mt-0.5">
-                                    {base?.name ?? saved.baseStrategyId}
-                                  </p>
-                                  {saved.lastBacktest && (
-                                    <div className="flex items-center gap-2 mt-1.5">
-                                      <span
-                                        className={`font-dm-mono text-[10px] font-bold ${saved.lastBacktest.totalReturn >= 0 ? "text-[#00e676]" : "text-[#f87171]"}`}
-                                      >
-                                        {saved.lastBacktest.totalReturn >= 0 ? "+" : ""}
-                                        {saved.lastBacktest.totalReturn.toFixed(1)}%
-                                      </span>
-                                      <span className="font-dm-mono text-[10px] text-[#4b5563]">
-                                        {saved.lastBacktest.winRate.toFixed(0)}% WR
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex gap-1 flex-shrink-0">
-                                  <button
-                                    onClick={() => loadSaved(saved)}
-                                    className="px-2 py-1 rounded-lg font-dm-mono text-[10px] font-bold"
-                                    style={{ background: "rgba(0,230,118,0.1)", color: "#00e676" }}
-                                  >
-                                    Load
-                                  </button>
-                                  <button
-                                    onClick={() => deleteSaved(saved.id)}
-                                    className="px-2 py-1 rounded-lg font-dm-mono text-[10px]"
-                                    style={{ background: "rgba(248,113,113,0.08)", color: "#f87171" }}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
+                              saved={saved}
+                              base={base}
+                              liveTrades={liveTrades}
+                              liveWR={liveWR}
+                              onLoad={() => loadSaved(saved)}
+                              onDelete={() => deleteSaved(saved.id)}
+                              onLogTrade={(t) => {
+                                const updated = savedStrategies.map((s) =>
+                                  s.id === saved.id
+                                    ? { ...s, liveTrades: [...(s.liveTrades ?? []), t] }
+                                    : s
+                                );
+                                setSavedStrategies(updated);
+                                localStorage.setItem("ciq_saved_strategies", JSON.stringify(updated));
+                              }}
+                            />
                           );
                         })}
                       </div>
