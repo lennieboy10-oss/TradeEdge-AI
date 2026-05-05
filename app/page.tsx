@@ -5238,6 +5238,156 @@ export default function App() {
               </div>
             </div>
 
+            {/* ── FEATURE 9 — SIGNAL SYSTEM INDICATOR ─────────── */}
+            <div className="rounded-[14px] p-8 flex flex-col gap-6 group transition-colors duration-300 col-span-1 md:col-span-2"
+              style={{ background: "linear-gradient(145deg, #100d1f 0%, #0c0a18 100%)", border: "1.5px solid rgba(139,92,246,0.3)", boxShadow: "0 0 40px rgba(139,92,246,0.05)" }} data-animate data-delay="9">
+              <div className="flex flex-col md:flex-row gap-8">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase"
+                      style={{ background: "rgba(139,92,246,0.18)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.3)" }}>ELITE EXCLUSIVE</span>
+                  </div>
+                  <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">ChartIQ AI Signal System</h3>
+                  <p className="text-[#6b7280] text-sm leading-relaxed mb-4">
+                    The most advanced buy/sell indicator for TradingView — combining SMC, FVGs, order blocks, and liquidity analysis with a 6-factor confluence engine. Signals appear directly on your chart in real time.
+                  </p>
+                  <ul className="space-y-1.5">
+                    {[
+                      "SMC + FVG + order block confluence engine",
+                      "Buy/sell arrows with confidence score overlay",
+                      "Session filter: London, New York, Asian sessions",
+                      "Auto S/R levels plotted on every bar",
+                      "Works on any pair and any timeframe",
+                      "Free updates for life as a member",
+                    ].map((b) => (
+                      <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#a78bfa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        {b}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex-1 rounded-xl p-4 flex flex-col gap-3" style={{ background: "#080a10", border: "1px solid rgba(139,92,246,0.15)" }}>
+                  {/* Fake TradingView chart mockup */}
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-dm-mono text-[10px] text-[#6b7280] uppercase tracking-widest">XAU/USD · 1H · TradingView</span>
+                    <span className="font-dm-mono text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: "rgba(139,92,246,0.15)", color: "#a78bfa" }}>LIVE</span>
+                  </div>
+                  {/* Chart bars */}
+                  <div className="relative flex items-end gap-0.5 h-24 px-1">
+                    {[55, 40, 70, 50, 60, 45, 80, 65, 55, 75, 50, 85, 60, 70, 45, 65, 80, 55, 90, 70].map((h, i) => (
+                      <div key={i} className="flex-1 rounded-sm relative" style={{ height: `${h}%`, background: i < 12 ? "rgba(0,230,118,0.25)" : "rgba(248,113,113,0.25)" }}>
+                        {i === 6 && (
+                          <div className="absolute -top-5 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                            <span className="font-dm-mono text-[8px] font-bold" style={{ color: "#00e676" }}>BUY</span>
+                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M4 1v6M1 4l3-3 3 3" stroke="#00e676" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                          </div>
+                        )}
+                        {i === 14 && (
+                          <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M4 7V1M1 4l3 3 3-3" stroke="#f87171" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                            <span className="font-dm-mono text-[8px] font-bold" style={{ color: "#f87171" }}>SELL</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {/* S/R lines */}
+                    <div className="absolute inset-x-0" style={{ top: "20%", borderTop: "1px dashed rgba(0,230,118,0.4)" }} />
+                    <div className="absolute inset-x-0" style={{ top: "65%", borderTop: "1px dashed rgba(248,113,113,0.4)" }} />
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {[
+                      { label: "Confluence", value: "6/6", color: "#00e676" },
+                      { label: "Session", value: "NY Open", color: "#a78bfa" },
+                      { label: "Structure", value: "BOS ↑", color: "#4ade80" },
+                    ].map((s) => (
+                      <div key={s.label} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                        <span className="font-dm-mono text-[9px] text-[#6b7280]">{s.label}</span>
+                        <span className="font-dm-mono text-[10px] font-bold" style={{ color: s.color }}>{s.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── FEATURE 10 — AUTOMATED TRADING ──────────────── */}
+            <div className="rounded-[14px] p-8 flex flex-col gap-6 group transition-colors duration-300 col-span-1 md:col-span-2"
+              style={{ background: "linear-gradient(145deg, #100d1f 0%, #0c0a18 100%)", border: "1.5px solid rgba(139,92,246,0.3)", boxShadow: "0 0 40px rgba(139,92,246,0.05)" }} data-animate data-delay="10">
+              <div className="flex flex-col md:flex-row gap-8">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase"
+                      style={{ background: "rgba(139,92,246,0.18)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.3)" }}>ELITE EXCLUSIVE</span>
+                  </div>
+                  <h3 className="font-bebas text-[28px] tracking-[0.03em] text-white leading-none mb-2">MT4/MT5 Expert Advisor Auto-Trading</h3>
+                  <p className="text-[#6b7280] text-sm leading-relaxed mb-4">
+                    ChartIQ polls for new high-confidence signals every 60 seconds and places trades automatically on your MT4 or MT5 account. Set your thresholds, lot size, and sessions — then let it run.
+                  </p>
+                  <ul className="space-y-1.5">
+                    {[
+                      "Fully automated signal-to-order execution",
+                      "Configurable minimum confidence threshold",
+                      "Custom lot size and daily trade limits",
+                      "Session filter: trade only London, NY, or both",
+                      "Instant kill switch with STOP confirmation",
+                      "Trade placed email + in-app notifications",
+                    ].map((b) => (
+                      <li key={b} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#a78bfa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        {b}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex-1 rounded-xl p-4 flex flex-col gap-3" style={{ background: "#080a10", border: "1px solid rgba(139,92,246,0.15)" }}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-dm-mono text-[10px] text-[#6b7280] uppercase tracking-widest">Automation Status</span>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[#00e676]" style={{ boxShadow: "0 0 6px #00e676" }} />
+                      <span className="font-dm-mono text-[10px] font-bold text-[#00e676]">RUNNING</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {[
+                      { label: "Min confidence", value: "80%",     color: "#a78bfa" },
+                      { label: "Lot size",        value: "0.10",    color: "#e2e8f0" },
+                      { label: "Session",         value: "London + NY", color: "#e2e8f0" },
+                      { label: "Daily limit",     value: "3 trades", color: "#e2e8f0" },
+                    ].map((r) => (
+                      <div key={r.label} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+                        <span className="font-dm-mono text-[10px] text-[#6b7280]">{r.label}</span>
+                        <span className="font-dm-mono text-[11px] font-bold" style={{ color: r.color }}>{r.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="space-y-1.5 pt-1">
+                    {[
+                      { pair: "XAU/USD", dir: "LONG",  conf: 87, status: "Placed", time: "09:32" },
+                      { pair: "GBP/USD", dir: "SHORT", conf: 82, status: "Placed", time: "10:15" },
+                    ].map((t) => (
+                      <div key={t.time} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: "rgba(139,92,246,0.07)", border: "1px solid rgba(139,92,246,0.15)" }}>
+                        <div className="flex items-center gap-2">
+                          <span className="font-dm-mono text-[10px] font-bold text-white">{t.pair}</span>
+                          <span className="font-dm-mono text-[9px] px-1.5 py-0.5 rounded font-bold"
+                            style={{ background: t.dir === "LONG" ? "rgba(0,230,118,0.15)" : "rgba(248,113,113,0.15)", color: t.dir === "LONG" ? "#00e676" : "#f87171" }}>{t.dir}</span>
+                          <span className="font-dm-mono text-[9px] text-[#a78bfa]">{t.conf}%</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="#00e676" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                          <span className="font-dm-mono text-[9px] text-[#6b7280]">{t.time}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="w-full py-2 rounded-xl font-dm-mono text-[11px] font-bold transition-all hover:opacity-80 mt-1"
+                    style={{ background: "rgba(248,113,113,0.12)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)" }}>
+                    ■ STOP Automation
+                  </button>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
